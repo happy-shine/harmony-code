@@ -1,0 +1,31 @@
+# Vendored reference (research only, not part of build)
+claude-code-main/
+emergency_plan_swiftgen_v2-main/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+
+# Node
+node_modules/
+.next/
+pnpm-debug.log
+.turbo/
+
+# deer-flow specific
+deer-flow-main/backend/.deer-flow/
+deer-flow-main/backend/skills_store/
+deer-flow-main/backend/uv.lock  # keep? decide in M5
+deer-flow-main/frontend/.next/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
