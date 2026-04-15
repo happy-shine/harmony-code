@@ -54,6 +54,17 @@ const config = {
       });
     }
 
+    if (!process.env.NEXT_PUBLIC_BACKEND_BASE_URL) {
+      rewrites.push({
+        source: "/api/threads",
+        destination: `${gatewayURL}/api/threads`,
+      });
+      rewrites.push({
+        source: "/api/threads/:path*",
+        destination: `${gatewayURL}/api/threads/:path*`,
+      });
+    }
+
     return rewrites;
   },
 };
