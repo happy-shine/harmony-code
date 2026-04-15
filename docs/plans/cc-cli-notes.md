@@ -505,3 +505,34 @@ Attempted on 2026-04-15 at cwd `deer-flow-main/backend/` via
   deer-flow stack. M5 will tear out LangGraph + its transitives,
   which should substantially shrink the sync. Until then, iteration
   pays the full cost.
+
+---
+
+# Task 1.5: Thread model location
+
+Ripgrep on 2026-04-15 for `class.*Thread` under `deer-flow-main/backend/app/`.
+
+- **No SQLAlchemy / SQLModel Thread class exists.** The only hit is
+  `app/gateway/routers/threads.py`, which defines only FastAPI
+  Pydantic request/response shapes (`ThreadResponse`,
+  `ThreadCreateRequest`, `ThreadSearchRequest`, `ThreadStateResponse`,
+  `ThreadPatchRequest`, `ThreadStateUpdateRequest`, `ThreadHistoryRequest`,
+  `ThreadDeleteResponse`, `HistoryEntry`). None of these are DB models.
+- **Existing persistence is LangGraph-based**, not a relational table:
+  thread metadata is written to a LangGraph `Store` under the
+  `("threads",)` namespace (see `_store_put` / `_store_get` helpers
+  in `threads.py`), and thread state is persisted in a LangGraph
+  checkpointer. Neither carries a `session_id` or a `cwd` column —
+  they store `thread_id, status, created_at, updated_at, metadata,
+  values`. So there is no overlap with our CC-specific fields.
+- **M1 decision:** introducing a minimal standalone SQLite table
+  `cc_thread_session(thread_id PK, session_id, cwd NOT NULL)` at
+  `app/cc_adapter/session_store.py`. This is deliberately separate
+  from the LangGraph-backed thread record — the LangGraph runtime
+  (and its Store / checkpointer thread record) is scheduled for M5
+  removal per `backend/CLAUDE.md`, so consolidating into it now
+  would be wasted work. M5 will decide the final thread table shape
+  and migrate both the LangGraph record and this mapping into it.
+- No existing schema or migration system (Alembic etc.) was touched;
+  the SQLite file is created on demand via `SessionStore.ensure_schema()`
+  and its path is chosen by the caller (Task 1.6 gateway wiring).
