@@ -1,11 +1,11 @@
 import json
 from pathlib import Path
 
-import pytest
-
 from app.cc_adapter.stream_parser import StreamParser
 
+# Repo root is 4 levels up: test file → cc_adapter → tests → backend → deer-flow-main → harmony-code
 SAMPLE_PATH = Path(__file__).resolve().parents[4] / "docs/plans/cc-jsonl-samples/01-hello-text.jsonl"
+assert SAMPLE_PATH.exists(), f"fixture missing: {SAMPLE_PATH}"
 
 
 def test_parser_extracts_session_id_from_init():
