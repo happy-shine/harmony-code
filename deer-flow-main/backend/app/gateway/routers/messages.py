@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from typing import AsyncIterator
@@ -14,6 +15,8 @@ from app.cc_adapter.adapter import CCAdapter
 from app.cc_adapter.session_store import SessionStore
 from app.cc_adapter.types import SpawnConfig
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
@@ -98,8 +101,8 @@ async def send_message(tid: str, body: SendMessageBody, request: Request):
             # aclose the adapter generator to drive its GeneratorExit cleanup.
             try:
                 await gen.aclose()
-            except Exception:
-                pass
+            except Exception as e:  # pragma: no cover
+                logger.debug("adapter aclose swallowed on cleanup: %r", e)
             async with _inflight_lock:
                 _inflight.discard(tid)
 

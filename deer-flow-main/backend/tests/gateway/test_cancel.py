@@ -32,10 +32,18 @@ async def test_client_disconnect_allows_new_message(gateway_server):
             _ = await ait.__anext__()
             await r.aclose()
 
-        # Give the server a moment to finish cleanup.
-        await asyncio.sleep(1.0)
+        # After r.aclose(), poll /cancel until the server reports the thread is idle.
+        # Max 5s total; typical is well under 1s.
+        deadline = asyncio.get_event_loop().time() + 5.0
+        while asyncio.get_event_loop().time() < deadline:
+            cancel_resp = await client.post(f"{base}/api/threads/{tid}/cancel")
+            if cancel_resp.json().get("reason") == "no_inflight":
+                break
+            await asyncio.sleep(0.1)
+        else:
+            pytest.fail("thread did not clear inflight within 5s of disconnect")
 
-        # New message on same thread must not 409.
+        # Now the new message must succeed.
         r2 = await client.post(
             f"{base}/api/threads/{tid}/messages",
             json={"content": "say hi in one word"},
