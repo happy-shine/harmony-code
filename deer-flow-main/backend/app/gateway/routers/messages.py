@@ -76,9 +76,11 @@ async def send_message(tid: str, body: SendMessageBody, request: Request):
     )
 
     async def event_gen() -> AsyncIterator[dict]:
+        gen = adapter.run(cfg)
         try:
-            async for ev in adapter.run(cfg):
+            async for ev in gen:
                 if await request.is_disconnected():
+                    await gen.aclose()
                     break
                 # capture session_id on first init
                 if (ev.get("type") == "system"
@@ -88,9 +90,31 @@ async def send_message(tid: str, body: SendMessageBody, request: Request):
                     if sid:
                         store.set_session_id(tid, sid)
                 yield {"data": json.dumps(ev, separators=(",", ":"))}
-            yield {"event": "done", "data": "{}"}
+            else:
+                # natural EOF: emit done. (Skipped on break.)
+                yield {"event": "done", "data": "{}"}
         finally:
+            # Belt-and-suspenders: if we exit via exception or cancellation,
+            # aclose the adapter generator to drive its GeneratorExit cleanup.
+            try:
+                await gen.aclose()
+            except Exception:
+                pass
             async with _inflight_lock:
                 _inflight.discard(tid)
 
     return EventSourceResponse(event_gen())
+
+
+@router.post("/threads/{tid}/cancel")
+async def cancel_thread(tid: str):
+    """Explicit cancel. M1 scope: this is a status stub only.
+
+    CC actually dies via the client-disconnect path (SSE stream abort → sse-starlette
+    closes event_gen → adapter's GeneratorExit handler terminates the subprocess).
+    M5 wires this endpoint to a task registry that can signal an in-flight stream.
+    """
+    async with _inflight_lock:
+        if tid not in _inflight:
+            return {"canceled": False, "reason": "no_inflight"}
+    return {"canceled": True, "note": "disconnect to actually cancel; explicit kill is M5"}
