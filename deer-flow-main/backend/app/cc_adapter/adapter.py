@@ -33,6 +33,13 @@ class CCAdapter:
         return cmd
 
     def build_env(self, cfg: SpawnConfig) -> dict[str, str]:
+        """Build subprocess env from allowlisted vars + CLAUDE_CODE_* + cfg.extra_env.
+
+        Precedence: `cfg.extra_env` overrides both the allowlisted passthrough vars
+        (PATH, HOME, LANG, LC_ALL, TZ) and any inherited CLAUDE_CODE_* vars. This is
+        intentional — callers passing e.g. `extra_env={"PATH": ""}` get an empty PATH
+        (a deliberate test escape hatch for simulating a missing claude binary).
+        """
         env: dict[str, str] = {}
         for k in self.ENV_PASSTHROUGH:
             if k in os.environ:
@@ -44,7 +51,16 @@ class CCAdapter:
         return env
 
     async def run(self, cfg: SpawnConfig) -> AsyncIterator[dict]:
-        """Yield dict events; each event is a CC jsonl frame OR an _adapter synthetic frame."""
+        """Yield dict events; each event is a CC jsonl frame OR an _adapter synthetic frame.
+
+        Diagnostic error frames (`_adapter.error` with `code=cc_nonzero_exit`) are only
+        emitted on the *natural exit* path — i.e. when CC's stdout hits EOF and we
+        observe a nonzero exit code. If the consumer breaks early (e.g. after receiving
+        a terminal `result` frame), the resulting `GeneratorExit` triggers best-effort
+        subprocess cleanup but swallows the error frame by design: the consumer has
+        already decided the run is done, and our own SIGTERM would otherwise produce a
+        false-positive nonzero exit.
+        """
         cmd = self.build_cmd(cfg)
         env = self.build_env(cfg)
 
@@ -56,18 +72,15 @@ class CCAdapter:
         try:
             async for raw in proc.stream():
                 if not yielded_spawned:
+                    # `spawned` fires on the first stdout line, not on fork success —
+                    # a CC process that dies before writing anything will never produce
+                    # this frame. Treat absence of `spawned` as "CC never started talking".
                     yield {"type": "_adapter", "subtype": "spawned", "pid": proc.pid}
                     yielded_spawned = True
                 event, _ = parser.feed_line(raw)
                 if event is not None:
                     yield event
-        finally:
-            # Consumer may break early (e.g. after seeing the `result` event) before
-            # the subprocess has exited. If we called wait() on a still-running proc
-            # with an open stdout pipe, we'd hang forever. Terminate first to ensure
-            # wait() returns promptly; if CC already exited naturally, terminate()
-            # is a no-op and wait() just reaps the exit code.
-            await proc.terminate()
+            # Natural exit: CC's stdout hit EOF. Safe to yield diagnostics.
             code = await proc.wait()
             if code != 0:
                 yield {
@@ -77,3 +90,16 @@ class CCAdapter:
                     "exit_code": code,
                     "stderr_tail": proc.stderr_tail().decode("utf-8", errors="replace")[-2000:],
                 }
+        except GeneratorExit:
+            # Consumer broke early (e.g. after result). We MUST NOT yield here —
+            # Python 3.8+ raises RuntimeError if an async generator yields after
+            # GeneratorExit. Best-effort cleanup: terminate CC and reap. Errors
+            # are swallowed by design; the consumer already decided it's done.
+            await proc.terminate()
+            await proc.wait()
+            raise
+        except BaseException:
+            # Any other exception: still need to clean up the subprocess, then re-raise.
+            await proc.terminate()
+            await proc.wait()
+            raise
