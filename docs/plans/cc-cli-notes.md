@@ -261,3 +261,167 @@ edit the design doc itself** — it records the facts for later decision.
     above. M2 parser design is for stream-json stdout; any feature that
     reads the on-disk file (e.g. `/api/threads/{tid}/session-jsonl`)
     needs a separate parser.
+
+---
+
+# Task 0.4: MCP config + skill discovery
+
+Run on 2026-04-15 with CC `2.1.92`. Samples stored at
+`docs/plans/cc-jsonl-samples/04-with-mcp.jsonl` and `05-with-skill.jsonl`.
+
+## MCP config verification
+
+### Init-frame field name
+
+The `system.init` frame exposes connected MCP servers on the key
+**`mcp_servers`** (snake_case, plural, array of `{name, status}`). This
+matches the existing "Confirmed event types" section and contradicts the
+`mcpServers` (camelCase) naming used in the INPUT config file — i.e.:
+
+- Config file input: top-level `"mcpServers"` object (camelCase)
+- stdout init frame output: `"mcp_servers"` array (snake_case)
+
+Parsers and any UI surfacing MCP status must key off `mcp_servers`, not
+`mcpServers`, in the stream-json stdout.
+
+### Sample 04 proof
+
+`docs/plans/cc-jsonl-samples/04-with-mcp.jsonl` line 3 (`system.init`)
+contains (excerpted):
+
+```json
+"mcp_servers": [
+  {"name": "bilibili", "status": "pending"},
+  {"name": "js-reverse", "status": "pending"},
+  {"name": "filesystem", "status": "pending"}
+]
+```
+
+The `filesystem` entry is the one registered via
+`--mcp-config /tmp/mcp-test.json`. The other two (`bilibili`,
+`js-reverse`) are user-global MCP servers picked up from the capturing
+dev's environment; they are unrelated to this task and will not appear
+when harmony-code spawns CC in an isolated per-thread env. `status` is
+`"pending"` at init time — init is emitted before the MCP handshake
+completes, so the field proves registration but not liveness.
+
+### Argv hazard: `--mcp-config` variadic swallows the prompt
+
+`--mcp-config <configs...>` is variadic. In the first attempt we passed
+`--mcp-config /tmp/mcp-test.json "list available tools briefly"` and CC
+treated the prompt string as a SECOND mcp-config path, failing with:
+
+```
+Error: Invalid MCP configuration:
+MCP config file not found: /private/tmp/cc-spike/workspace/list available tools briefly
+```
+
+**Fix:** always emit `--` between the last `--mcp-config` value and the
+positional prompt, i.e. `--mcp-config /path/to/mcp.json -- "<prompt>"`.
+This applies to `--add-dir` too (also variadic). M1's adapter argv
+builder MUST insert `--` before the prompt argument whenever any
+variadic flag is present.
+
+### Invocation command (for reproducibility)
+
+```bash
+cd /tmp/cc-spike/workspace
+claude -p --output-format stream-json --verbose \
+  --permission-mode bypassPermissions \
+  --mcp-config /tmp/mcp-test.json \
+  -- "list available tools briefly" \
+  > /tmp/cc-sample-04.jsonl
+```
+
+## Skill discovery path
+
+### Setup
+
+- `/tmp/cc-spike/workspace/.claude/skills/hello-skill/SKILL.md` — used
+  for sample 05 (cwd-level discovery).
+- `/tmp/cc-spike/user-data/.claude/skills/hello-skill/SKILL.md` — used
+  for Step 3 (parent-of-cwd discovery, with cwd
+  `/tmp/cc-spike/user-data/workspace/` which has no `.claude/` dir).
+- `/tmp/cc-spike/probe/a/.claude/skills/hello-skill/SKILL.md` — used
+  for an extra grandparent probe (cwd
+  `/tmp/cc-spike/probe/a/b/c/`, three levels deep, no `.claude/` on the
+  path between).
+
+### Observed: CC walks UP from cwd looking for `.claude/skills/`
+
+All three setups above emit `hello-skill` in the `system.init` frame's
+`skills[]` array, and the assistant invokes it via a `tool_use` of the
+`Skill` tool with `input.skill == "hello-skill"`, producing the exact
+phrase encoded in the SKILL.md.
+
+**Proof it is the PARENT's skill, not a stray cache / global copy:**
+we temporarily edited the parent SKILL.md to emit
+`"Hello from harmony-code PARENT skill!"` and re-ran CC from
+`/tmp/cc-spike/user-data/workspace/`. The `result.result` field came
+back with exactly that PARENT-marker phrase — i.e. CC loaded the file
+we edited, not a cached/global one. Restored to the original phrase
+before committing.
+
+**Proof CC walks more than one level:** with cwd
+`/tmp/cc-spike/probe/a/b/c/` (no `.claude/` at `c/`, `b/`, or `a/b/`),
+and the SKILL at `/tmp/cc-spike/probe/a/.claude/skills/hello-skill/`,
+`result.result` came back as
+`"Hello from GRANDPARENT two-levels-up skill!"`. So CC traverses
+ancestor directories until it finds a `.claude/` (at least 3 levels
+tested; plausibly all the way to `/`).
+
+### Search-path precedence (observed)
+
+The `skills[]` list in `system.init` is a flat union of all
+sources. Observed sources, with the namespace prefix CC assigns:
+
+1. **`<nearest_ancestor>/.claude/skills/<name>/SKILL.md`** — listed
+   unqualified (e.g. `hello-skill`). Project-local / per-workspace.
+2. **`~/.claude/skills/<name>/SKILL.md`** — listed unqualified in our
+   environment (e.g. `update-config`, `simplify`, `loop`, ...). User-
+   level global skills.
+3. **`~/.claude/plugins/<plugin>/skills/<name>/SKILL.md`** — listed
+   prefixed with the plugin name (e.g. `superpowers:write-plan`,
+   `superpowers:using-git-worktrees`). Plugin-scoped skills.
+
+We did not observe a collision between a workspace-local `hello-skill`
+and a user-global `hello-skill`, so precedence-on-collision is not
+directly tested here; if the project ever needs that guarantee, add a
+dedicated test. For the harmony-code design, the relevant fact is that
+a workspace-local / parent-of-cwd skill IS discovered and IS callable.
+
+### Implication for harmony-code layout
+
+The plan puts per-thread workspace at
+`backend/.deer-flow/threads/{tid}/user-data/workspace/` and per-thread
+skills at `backend/.deer-flow/threads/{tid}/user-data/.claude/skills/`
+— i.e. skills one directory ABOVE the CC process cwd. This layout is
+**CONFIRMED WORKING**: CC's ancestor-walk finds `.claude/skills/` at
+the parent of cwd (Step 3) and even further up (probe). No design
+adjustment required on this axis.
+
+### Caveat: user's global `~/.claude/skills` leaks in
+
+Any skill in the capturing user's `~/.claude/skills/` and any installed
+plugin's `.claude/plugins/*/skills/` is also listed by the init frame,
+regardless of thread isolation. For harmony-code we either (a) accept
+that harness-level skills are visible to threads (likely fine), or (b)
+override `HOME` when spawning the CC subprocess to point at a
+thread-scoped fake home — deferred to a later milestone.
+
+### Invocation commands (for reproducibility)
+
+```bash
+# Sample 05 — skill at cwd's .claude/
+cd /tmp/cc-spike/workspace
+claude -p --output-format stream-json --verbose \
+  --permission-mode bypassPermissions \
+  -- "greet" \
+  > /tmp/cc-sample-05.jsonl
+
+# Step 3 — skill at parent of cwd (not committed as a sample)
+cd /tmp/cc-spike/user-data/workspace
+claude -p --output-format stream-json --verbose \
+  --permission-mode bypassPermissions \
+  -- "greet"
+```
