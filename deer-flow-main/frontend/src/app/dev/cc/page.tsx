@@ -10,6 +10,10 @@ export default function DevCCPage() {
 
   const createThread = async () => {
     const r = await fetch("/api/threads", { method: "POST" });
+    if (!r.ok) {
+      setLog((l) => [...l, `[create failed: ${r.status}]`]);
+      return;
+    }
     const j = (await r.json()) as { id: string };
     setThreadId(j.id);
     setLog((l) => [...l, `[created thread ${j.id}]`]);
@@ -17,14 +21,20 @@ export default function DevCCPage() {
 
   const send = async () => {
     if (!threadId) return;
-    abortRef.current = new AbortController();
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const r = await fetch(`/api/threads/${threadId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content }),
-        signal: abortRef.current.signal,
+        signal: controller.signal,
       });
+      if (!r.ok) {
+        setLog((l) => [...l, `[send failed: ${r.status}]`]);
+        return;
+      }
       if (!r.body) {
         setLog((l) => [...l, "[no response body]"]);
         return;
@@ -32,23 +42,31 @@ export default function DevCCPage() {
       const reader = r.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const parts = buf.split("\n\n");
-        const complete = parts.slice(0, -1);
-        buf = parts[parts.length - 1] ?? "";
-        for (const frame of complete) {
-          if (frame.length > 0) setLog((l) => [...l, frame]);
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const parts = buf.split("\n\n");
+          const complete = parts.slice(0, -1);
+          buf = parts[parts.length - 1] ?? "";
+          for (const frame of complete) {
+            if (frame.length > 0) setLog((l) => [...l, frame]);
+          }
         }
+        // Any leftover `buf` without a trailing "\n\n" is an incomplete SSE
+        // frame and is intentionally dropped.
+      } finally {
+        reader.releaseLock();
       }
     } catch (err) {
-      if ((err as { name?: string }).name === "AbortError") {
+      if (err instanceof DOMException && err.name === "AbortError") {
         setLog((l) => [...l, "[aborted]"]);
       } else {
         setLog((l) => [...l, `[error] ${String(err)}`]);
       }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
     }
   };
 
