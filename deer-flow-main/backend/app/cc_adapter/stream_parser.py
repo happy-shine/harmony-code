@@ -1,6 +1,5 @@
 """Parse CC stdout jsonl line-by-line, extract session_id, pass through everything else."""
 import json
-from typing import AsyncIterator
 
 
 class StreamParser:
