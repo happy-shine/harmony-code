@@ -58,6 +58,8 @@ Every required flag is present — no missing flags.
   No design change required — just a superset.
 - `--resume` takes an optional `[value]` (session ID). When omitted it opens
   an interactive picker. For spawn use we'll always pass the session ID.
+
+  > **Adapter hazard (M1):** If `--resume` is emitted without a value — empty string, undefined-stringified, or trailing argv position — CC opens an interactive picker and blocks the subprocess waiting for TTY input the adapter cannot provide. The adapter MUST validate `session_id` is non-empty *before* appending `--resume <id>` to argv; an absent session ID must result in the flag being omitted entirely, not passed with an empty value.
 - `--mcp-config` accepts multiple configs (variadic `<configs...>`,
   space-separated). The design template uses a single config path which is
   fine — variadic accepts 1+.
