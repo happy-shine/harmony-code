@@ -363,6 +363,27 @@ backend/.deer-flow/threads/{tid}/user-data/
 - 物理: `~/.claude/projects/{cwd-hash}/{sid}.jsonl` 全服共用目录
 - 访问控制在 Gateway 做: 只通过 `/api/threads/{tid}/session-jsonl` 访问, 校验 `user_id`
 - 孤儿 jsonl (磁盘有但 DB 无): 每日半夜 GC 扫对账
+- **`{cwd-hash}` 派生规则** (M0 实测, CC 2.1.92): CC 对 cwd 调用 `os.path.realpath` 后把路径分隔符 `/` 换成 `-` 得到目录名。例如 `/tmp/cc-spike/workspace` 在 macOS 会因 `/tmp` → `/private/tmp` 符号链接被规范化成 `-private-tmp-cc-spike-workspace`。SessionStore 计算 jsonl 路径时必须先 `realpath(cwd)` 再派生, 否则会开文件失败。
+
+### Hook frame 转发策略 (M1)
+
+CC 在每次 `system.init` 之前会先发 `system/hook_started` + `system/hook_response` 帧, 其 payload 内嵌 hook 进程的 stdout 原文。hook 脚本可能读 env / secrets / 凭据, 这些内容以 **明文** 出现在 stdout 里。
+
+**决策 (2026-04-15): 默认在 Gateway SSE 层 drop 掉所有 `type == "system" && subtype` 以 `hook_` 开头的帧, 不转发给前端。** 理由:
+- 单用户自用场景也不应默认把 hook stdout 暴露给浏览器 (开发者工具 / 扩展可读)
+- 调试时按需开一个 `?include_hooks=1` query 开关即可, 不默认开
+- frontend 的事件模型 (Section 4 TS types) 因此不需要 `system.hook_*` 变体
+
+### HOME 泄漏 (M1 已知限制, 延后至 M5 修复)
+
+M0 实测: 在用户 dev 机器上 spawn CC 时, 全局 `~/.claude/skills/` / 插件 skills / 用户级 MCP servers (如 `bilibili` / `js-reverse`) 会自动进入 spawned thread 的 init 帧。这意味着 **thread 可用 skill/MCP 面不由 thread config 决定, 而与 host 的 `$HOME` 耦合**。
+
+- M1: 接受泄漏, 在 audit log 的 `skills_enabled` / `mcp_servers_enabled` 字段里如实记录全部出现项 (包括泄漏进来的), 前端渲染时不区别对待
+- M5: spike 以下选项中的可行者
+  - a. spawn 时 `HOME=<thread-workspace>` 或类似的 `CLAUDE_CONFIG_DIR` 覆盖 (需先确认 CC 是否识别)
+  - b. 把 thread-scope `.claude/` 的优先级设为最高, 然后在 config 里显式 deny 全局项
+  - c. pre-spawn 生成 ephemeral `$HOME`, 内只链必要凭据文件
+- 不上 C/SaaS 前必须修, 因为多租户里 host `$HOME` 的 skill 可能包含其他用户的代码
 
 ### 审计
 

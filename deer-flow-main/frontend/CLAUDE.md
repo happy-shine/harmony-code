@@ -1,91 +1,35 @@
-# CLAUDE.md
+# CLAUDE.md (harmony-code fork of deer-flow frontend)
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+> **This tree is being rewritten for harmony-code.** Routes, hooks, and
+> message rendering tied to LangGraph are being replaced with a CC-native
+> event model.
 
-## Project Overview
+## Where to read before making changes
 
-DeerFlow Frontend is a Next.js 16 web interface for an AI agent system. It communicates with a LangGraph-based backend to provide thread-based AI conversations with streaming responses, artifacts, and a skills/tools system.
+- `docs/plans/2026-04-15-harmony-code-design.md` §4 (前端改造) — target event
+  model: TS types 1:1 with CC stream-json. Thread hooks consume
+  `POST /api/threads/{tid}/messages` SSE instead of LangGraph SDK.
+- `docs/plans/2026-04-15-harmony-code-plan.md` M4 — task-level frontend
+  changes (thread hooks, artifact panel, skills/MCP UI).
+- `docs/plans/cc-cli-notes.md` — canonical CC event shapes (assistant / user
+  blocks, tool_use ↔ tool_result correlation by `tool_use_id`, system.init
+  fields, rate_limit_event, hook_* frames). Source of truth; the current
+  frontend's message types do NOT reflect CC yet.
 
-**Stack**: Next.js 16, React 19, TypeScript 5.8, Tailwind CSS 4, pnpm 10.26.2
+## Stack (unchanged)
 
-## Commands
+Next.js 16, React 19, TypeScript 5.8, Tailwind 4, pnpm 10.26.2.
+Commands (`pnpm dev|build|check|lint|test|typecheck|start`) are in the
+existing README; harmony-code does not change the command surface.
 
-| Command          | Purpose                                           |
-| ---------------- | ------------------------------------------------- |
-| `pnpm dev`       | Dev server with Turbopack (http://localhost:3000) |
-| `pnpm build`     | Production build                                  |
-| `pnpm check`     | Lint + type check (run before committing)         |
-| `pnpm lint`      | ESLint only                                       |
-| `pnpm lint:fix`  | ESLint with auto-fix                              |
-| `pnpm test`      | Run unit tests with Vitest                        |
-| `pnpm typecheck` | TypeScript type check (`tsc --noEmit`)            |
-| `pnpm start`     | Start production server                           |
+## Removed in M4/M5
 
-Unit tests live under `tests/unit/` and mirror the `src/` layout (e.g., `tests/unit/core/api/stream-mode.test.ts` tests `src/core/api/stream-mode.ts`). Powered by Vitest; import source modules via the `@/` path alias.
+LangGraph SDK client (`core/api/`), LangGraph-shaped message types, any
+assistant-routing logic tied to sub-agents. Replaced with CC jsonl event
+streaming.
 
-## Architecture
+## If a subagent is about to edit this tree
 
-```
-Frontend (Next.js) ──▶ LangGraph SDK ──▶ LangGraph Backend (lead_agent)
-                                              ├── Sub-Agents
-                                              └── Tools & Skills
-```
-
-The frontend is a stateful chat application. Users create **threads** (conversations), send messages, and receive streamed AI responses. The backend orchestrates agents that can produce **artifacts** (files/code) and **todos**.
-
-### Source Layout (`src/`)
-
-- **`app/`** — Next.js App Router. Routes: `/` (landing), `/workspace/chats/[thread_id]` (chat).
-- **`components/`** — React components split into:
-  - `ui/` — Shadcn UI primitives (auto-generated, ESLint-ignored)
-  - `ai-elements/` — Vercel AI SDK elements (auto-generated, ESLint-ignored)
-  - `workspace/` — Chat page components (messages, artifacts, settings)
-  - `landing/` — Landing page sections
-- **`core/`** — Business logic, the heart of the app:
-  - `threads/` — Thread creation, streaming, state management (hooks + types)
-  - `api/` — LangGraph client singleton
-  - `artifacts/` — Artifact loading and caching
-  - `i18n/` — Internationalization (en-US, zh-CN)
-  - `settings/` — User preferences in localStorage
-  - `memory/` — Persistent user memory system
-  - `skills/` — Skills installation and management
-  - `messages/` — Message processing and transformation
-  - `mcp/` — Model Context Protocol integration
-  - `models/` — TypeScript types and data models
-- **`hooks/`** — Shared React hooks
-- **`lib/`** — Utilities (`cn()` from clsx + tailwind-merge)
-- **`server/`** — Server-side code (better-auth, not yet active)
-- **`styles/`** — Global CSS with Tailwind v4 `@import` syntax and CSS variables for theming
-
-### Data Flow
-
-1. User input → thread hooks (`core/threads/hooks.ts`) → LangGraph SDK streaming
-2. Stream events update thread state (messages, artifacts, todos)
-3. TanStack Query manages server state; localStorage stores user settings
-4. Components subscribe to thread state and render updates
-
-### Key Patterns
-
-- **Server Components by default**, `"use client"` only for interactive components
-- **Thread hooks** (`useThreadStream`, `useSubmitThread`, `useThreads`) are the primary API interface
-- **LangGraph client** is a singleton obtained via `getAPIClient()` in `core/api/`
-- **Environment validation** uses `@t3-oss/env-nextjs` with Zod schemas (`src/env.js`). Skip with `SKIP_ENV_VALIDATION=1`
-
-## Code Style
-
-- **Imports**: Enforced ordering (builtin → external → internal → parent → sibling), alphabetized, newlines between groups. Use inline type imports: `import { type Foo }`.
-- **Unused variables**: Prefix with `_`.
-- **Class names**: Use `cn()` from `@/lib/utils` for conditional Tailwind classes.
-- **Path alias**: `@/*` maps to `src/*`.
-- **Components**: `ui/` and `ai-elements/` are generated from registries (Shadcn, MagicUI, React Bits, Vercel AI SDK) — don't manually edit these.
-
-## Environment
-
-Backend API URLs are optional; an nginx proxy is used by default:
-
-```
-NEXT_PUBLIC_BACKEND_BASE_URL=http://localhost:8001
-NEXT_PUBLIC_LANGGRAPH_BASE_URL=http://localhost:2024
-```
-
-Requires Node.js 22+ and pnpm 10.26.2+.
+Check the current task in the plan first. Many files under `core/messages/`
+and `core/threads/` will be rewritten — do NOT "improve" them for the old
+model; wait for the task that replaces them.

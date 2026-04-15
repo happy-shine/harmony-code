@@ -70,10 +70,10 @@ Every required flag is present — no missing flags.
 - `--resume <session_id>`
 - `--output-format stream-json` (also supports `text`, `json`)
 - `--verbose`
-- `--mcp-config <path>` (variadic, space-separated 1+ configs)
+- `--mcp-config <path>` (variadic, space-separated 1+ configs) — see also §"Argv hazard: variadic flags + positional prompt" under Task 0.4 (`--mcp-config` can greedily absorb the prompt if `--` is not emitted before positional args)
 - `--permission-mode <mode>` (values: `acceptEdits`, `auto`, `bypassPermissions`, `default`, `dontAsk`, `plan`)
 - `--model <name>` (alias e.g. `sonnet`/`opus`, or full name e.g. `claude-sonnet-4-6`)
-- `--add-dir <path>` (variadic, allowlist additional dirs)
+- `--add-dir <path>` (variadic, allowlist additional dirs) — same `--` hazard as `--mcp-config`
 
 ---
 
@@ -324,6 +324,24 @@ variadic flag is present.
 
 ### Invocation command (for reproducibility)
 
+`/tmp/mcp-test.json` used for this sample (kept inline so the fixture is
+self-contained after `/tmp` is wiped):
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/cc-spike/workspace"]
+    }
+  }
+}
+```
+
+Note the **camelCase `mcpServers`** in the input config vs. the
+**snake_case `mcp_servers`** in the stdout init frame — they are
+intentionally different keys on the two sides of CC.
+
 ```bash
 cd /tmp/cc-spike/workspace
 claude -p --output-format stream-json --verbose \
@@ -346,6 +364,24 @@ claude -p --output-format stream-json --verbose \
   for an extra grandparent probe (cwd
   `/tmp/cc-spike/probe/a/b/c/`, three levels deep, no `.claude/` on the
   path between).
+
+Each SKILL.md is identical apart from the phrase (for PARENT/GRANDPARENT
+markers during the discovery probe); the committed version is:
+
+```markdown
+---
+name: hello-skill
+description: A test skill that greets the world
+---
+
+When asked to greet, always respond with "Hello from harmony-code skill!".
+```
+
+The PARENT-marker and GRANDPARENT-marker variants temporarily edited the
+phrase to `"Hello from harmony-code PARENT skill!"` and
+`"Hello from GRANDPARENT two-levels-up skill!"` respectively, then
+restored the original after observation. These are not committed as
+separate fixtures since they are derivable from the base SKILL.md.
 
 ### Observed: CC walks UP from cwd looking for `.claude/skills/`
 
@@ -383,6 +419,14 @@ sources. Observed sources, with the namespace prefix CC assigns:
 3. **`~/.claude/plugins/<plugin>/skills/<name>/SKILL.md`** — listed
    prefixed with the plugin name (e.g. `superpowers:write-plan`,
    `superpowers:using-git-worktrees`). Plugin-scoped skills.
+
+**Dual listing on `slash_commands[]`:** skills from sources (1) and (2)
+ALSO appear in the init frame's `slash_commands[]` array (as
+`"/<skill-name>"`), whereas plugin skills from (3) appear in
+`slash_commands[]` with the plugin prefix (e.g. `/superpowers:write-plan`).
+Implication for harmony-code: if the frontend renders a slash-command
+palette, `slash_commands[]` is a superset view that already includes
+skills — the UI does not need to union `skills[] + slash_commands[]`.
 
 We did not observe a collision between a workspace-local `hello-skill`
 and a user-global `hello-skill`, so precedence-on-collision is not

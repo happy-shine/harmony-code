@@ -9,10 +9,19 @@ __pycache__/
 venv/
 .env
 .env.*
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 
 # Node
 node_modules/
 .next/
+out/
+*.tsbuildinfo
 pnpm-debug.log
 .turbo/
 
