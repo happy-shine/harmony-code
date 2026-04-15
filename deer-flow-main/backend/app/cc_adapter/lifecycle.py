@@ -13,6 +13,11 @@ class CCProcess:
     STDERR_TAIL_LINES = 500
 
     def __init__(self, cmd: list[str], cwd: str, env: dict[str, str]) -> None:
+        """Initialize. `env` is passed verbatim to the subprocess — no inheritance.
+        Passing `{}` yields an empty environment (no PATH), so bare commands like
+        `claude` will not be found. Callers that need PATH/HOME/etc. must populate
+        `env` explicitly (see `CCAdapter.build_env`).
+        """
         self.cmd = cmd
         self.cwd = cwd
         self.env = env
@@ -45,7 +50,8 @@ class CCProcess:
             yield line
 
     async def wait(self) -> int:
-        assert self._proc is not None
+        if self._proc is None:
+            raise RuntimeError("wait() called before stream()")
         code = await self._proc.wait()
         if self._stderr_reader_task:
             await self._stderr_reader_task

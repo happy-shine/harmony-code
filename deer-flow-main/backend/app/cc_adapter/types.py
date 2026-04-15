@@ -1,5 +1,18 @@
 """CC event TypedDicts. Only fields we actually consume."""
+from dataclasses import dataclass, field
 from typing import Any, Literal, TypedDict
+
+
+@dataclass
+class SpawnConfig:
+    cwd: str
+    user_prompt: str
+    resume_session_id: str | None = None
+    mcp_config_path: str | None = None
+    model: str | None = None
+    add_dirs: list[str] = field(default_factory=list)
+    permission_mode: str = "bypassPermissions"
+    extra_env: dict[str, str] = field(default_factory=dict)
 
 
 class CCSystemInit(TypedDict, total=False):
