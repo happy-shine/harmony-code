@@ -469,3 +469,39 @@ claude -p --output-format stream-json --verbose \
   --permission-mode bypassPermissions \
   -- "greet"
 ```
+
+---
+
+# Task 1.1: Pre-M1 test baseline
+
+Attempted on 2026-04-15 at cwd `deer-flow-main/backend/` via
+`make test` (= `PYTHONPATH=. uv run pytest tests/ -v`).
+
+**Result: unable to execute — environment not provisioned.**
+
+- `.venv/` exists (Python 3.12.12) but carries no project deps;
+  `pytest` is not importable (`No module named pytest`).
+- `uv run` transitively triggers a full `uv sync` of the project's
+  lockfile, which pulls ~200 MB of heavy transitive deps
+  (`onnxruntime`, `volcengine-python-sdk`, `speechrecognition`,
+  `duckdb`, `ruff`, `grpcio-tools`, `cryptography`, `magika`,
+  `primp`, `lark-oapi`, `pypdfium2`, `pdfminer-six`, etc.). The
+  sync was started but did not complete within the capture window.
+- No tests were collected; pass/fail/error/skip counts are all
+  **N/A**.
+
+**Implication for Task 1.2 and onward:**
+
+- Before the first test-authoring task runs, whoever is in the
+  execution seat must complete `uv sync` once in a network-capable
+  environment so pytest is available.
+- The "don't regress existing passing tests" contract cannot be
+  enforced by this baseline. Substitute contract for M1: **after
+  each cc_adapter task, only run tests under `tests/cc_adapter/`**
+  (new directory, so nothing can regress); re-attempt the full
+  `make test` only after dep sync succeeds, and amend this section
+  with the real numbers at that time.
+- Note on dependency weight: the existing dep set is the legacy
+  deer-flow stack. M5 will tear out LangGraph + its transitives,
+  which should substantially shrink the sync. Until then, iteration
+  pays the full cost.
