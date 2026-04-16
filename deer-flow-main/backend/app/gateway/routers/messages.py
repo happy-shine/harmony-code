@@ -104,6 +104,11 @@ async def send_message(tid: str, body: SendMessageBody, request: Request):
             db=db, user_id=user_id, skills_dir=thread_root / ".claude" / "skills"
         )
 
+        # User's default_model pref → SpawnConfig.model → --model in argv
+        # (adapter.build_cmd appends it iff cfg.model is truthy). Missing row
+        # and row with default_model IS NULL both yield None here, so neither
+        # the adapter nor CC gets a model flag — CC picks its own default.
+        prefs = db.get_user_prefs(user_id)
         adapter = CCAdapter()
         cfg = SpawnConfig(
             cwd=row.cwd,
@@ -112,6 +117,7 @@ async def send_message(tid: str, body: SendMessageBody, request: Request):
             mcp_config_path=str(mcp_path),
             add_dirs=[str(thread_root / "uploads")],
             permission_mode="bypassPermissions",
+            model=prefs.default_model if prefs else None,
         )
     except BaseException:
         async with _inflight_lock:

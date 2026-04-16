@@ -183,6 +183,73 @@ def test_inflight_released_when_compose_fails(migrated_data_dir, monkeypatch):
     assert tid not in messages._inflight, "inflight leaked after compose failure"
 
 
+def test_send_message_passes_user_default_model_to_spawn(
+    migrated_data_dir, monkeypatch
+):
+    """Task 3.6 wiring: user_prefs.default_model flows into SpawnConfig.model
+    and through CCAdapter.build_cmd as ``--model <id>``.
+
+    The M3 exit criterion ("UI change model → next spawn uses --model
+    with new value") rides on this path. We assert both layers — the
+    SpawnConfig handed to run() AND the argv build_cmd produces from it —
+    so a regression in either gets caught without depending on the real
+    claude binary.
+    """
+    db = Db(get_engine(migrated_data_dir))
+    db.upsert_user_prefs("u_default", default_model="claude-opus-4-5")
+
+    captured = _install_fake_adapter(monkeypatch)
+
+    from app.cc_adapter.adapter import CCAdapter
+    from app.gateway.harmony_app import app
+
+    client = TestClient(app)
+    tid = client.post("/api/threads", json={}).json()["id"]
+
+    with client.stream(
+        "POST", f"/api/threads/{tid}/messages", json={"content": "hi"}
+    ) as resp:
+        assert resp.status_code == 200
+        for _ in resp.iter_text():
+            pass
+
+    cfg = captured.value
+    assert cfg is not None
+    assert cfg.model == "claude-opus-4-5"
+
+    cmd = CCAdapter().build_cmd(cfg)
+    assert "--model" in cmd
+    # --model's value is the token immediately following it in argv.
+    assert cmd[cmd.index("--model") + 1] == "claude-opus-4-5"
+
+
+def test_send_message_no_model_flag_when_pref_unset(
+    migrated_data_dir, monkeypatch
+):
+    """If user_prefs has no row (or default_model IS NULL), build_cmd
+    must not emit ``--model`` — CC then uses its built-in default."""
+    captured = _install_fake_adapter(monkeypatch)
+
+    from app.cc_adapter.adapter import CCAdapter
+    from app.gateway.harmony_app import app
+
+    client = TestClient(app)
+    tid = client.post("/api/threads", json={}).json()["id"]
+
+    with client.stream(
+        "POST", f"/api/threads/{tid}/messages", json={"content": "hi"}
+    ) as resp:
+        assert resp.status_code == 200
+        for _ in resp.iter_text():
+            pass
+
+    cfg = captured.value
+    assert cfg is not None
+    assert cfg.model is None
+    cmd = CCAdapter().build_cmd(cfg)
+    assert "--model" not in cmd
+
+
 def test_send_message_skips_disabled_rows(migrated_data_dir, monkeypatch):
     """Disabled MCP/skills must not leak into the composed config."""
     db = Db(get_engine(migrated_data_dir))
