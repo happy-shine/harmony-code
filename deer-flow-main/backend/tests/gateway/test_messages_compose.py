@@ -196,7 +196,7 @@ def test_send_message_passes_user_default_model_to_spawn(
     claude binary.
     """
     db = Db(get_engine(migrated_data_dir))
-    db.upsert_user_prefs("u_default", default_model="claude-opus-4-5")
+    db.upsert_user_prefs("u_default", default_model="opus")
 
     captured = _install_fake_adapter(monkeypatch)
 
@@ -215,12 +215,12 @@ def test_send_message_passes_user_default_model_to_spawn(
 
     cfg = captured.value
     assert cfg is not None
-    assert cfg.model == "claude-opus-4-5"
+    assert cfg.model == "opus"
 
     cmd = CCAdapter().build_cmd(cfg)
     assert "--model" in cmd
     # --model's value is the token immediately following it in argv.
-    assert cmd[cmd.index("--model") + 1] == "claude-opus-4-5"
+    assert cmd[cmd.index("--model") + 1] == "opus"
 
 
 def test_send_message_no_model_flag_when_pref_unset(

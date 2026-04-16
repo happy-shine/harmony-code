@@ -80,18 +80,18 @@ def test_get_my_model_never_set_returns_null(client):
 
 def test_put_my_model_persists_and_round_trips(client):
     c, _ = client
-    r = c.put("/api/models/me", json={"default_model": "claude-sonnet-4-5"})
+    r = c.put("/api/models/me", json={"default_model": "sonnet"})
     assert r.status_code == 200, r.text
-    assert r.json() == {"default_model": "claude-sonnet-4-5"}
+    assert r.json() == {"default_model": "sonnet"}
     # Independent follow-up GET must see the persisted value.
     r2 = c.get("/api/models/me")
     assert r2.status_code == 200
-    assert r2.json() == {"default_model": "claude-sonnet-4-5"}
+    assert r2.json() == {"default_model": "sonnet"}
 
 
 def test_put_my_model_null_clears_previously_set_pref(client):
     c, _ = client
-    c.put("/api/models/me", json={"default_model": "claude-sonnet-4-5"})
+    c.put("/api/models/me", json={"default_model": "sonnet"})
     r = c.put("/api/models/me", json={"default_model": None})
     assert r.status_code == 200, r.text
     assert r.json() == {"default_model": None}
@@ -108,11 +108,11 @@ def test_put_my_model_rejects_unknown_id(client):
 
 def test_put_my_model_overwrites_existing(client):
     c, _ = client
-    c.put("/api/models/me", json={"default_model": "claude-sonnet-4-5"})
-    r = c.put("/api/models/me", json={"default_model": "claude-opus-4-5"})
+    c.put("/api/models/me", json={"default_model": "sonnet"})
+    r = c.put("/api/models/me", json={"default_model": "opus"})
     assert r.status_code == 200, r.text
-    assert r.json() == {"default_model": "claude-opus-4-5"}
-    assert c.get("/api/models/me").json() == {"default_model": "claude-opus-4-5"}
+    assert r.json() == {"default_model": "opus"}
+    assert c.get("/api/models/me").json() == {"default_model": "opus"}
 
 
 # --- Cross-check: router reads the same DB the adapter wiring will ---------
@@ -120,8 +120,8 @@ def test_put_my_model_overwrites_existing(client):
 
 def test_put_my_model_writes_row_visible_to_db_api(client):
     c, tmp = client
-    c.put("/api/models/me", json={"default_model": "claude-haiku-4-5"})
+    c.put("/api/models/me", json={"default_model": "haiku"})
     db = Db(get_engine(tmp))
     row = db.get_user_prefs("u_default")
     assert row is not None
-    assert row.default_model == "claude-haiku-4-5"
+    assert row.default_model == "haiku"

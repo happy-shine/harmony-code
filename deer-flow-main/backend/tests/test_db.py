@@ -53,23 +53,23 @@ def test_get_user_prefs_missing_returns_none(db):
 
 
 def test_upsert_user_prefs_inserts_when_missing(db):
-    db.upsert_user_prefs("u_default", default_model="claude-sonnet-4-5")
+    db.upsert_user_prefs("u_default", default_model="sonnet")
     row = db.get_user_prefs("u_default")
     assert row is not None
     assert row.user_id == "u_default"
-    assert row.default_model == "claude-sonnet-4-5"
+    assert row.default_model == "sonnet"
 
 
 def test_upsert_user_prefs_updates_when_present(db):
-    db.upsert_user_prefs("u_default", default_model="claude-sonnet-4-5")
-    db.upsert_user_prefs("u_default", default_model="claude-opus-4-5")
+    db.upsert_user_prefs("u_default", default_model="sonnet")
+    db.upsert_user_prefs("u_default", default_model="opus")
     row = db.get_user_prefs("u_default")
     assert row is not None
-    assert row.default_model == "claude-opus-4-5"
+    assert row.default_model == "opus"
 
 
 def test_upsert_user_prefs_clears_when_none(db):
-    db.upsert_user_prefs("u_default", default_model="claude-sonnet-4-5")
+    db.upsert_user_prefs("u_default", default_model="sonnet")
     db.upsert_user_prefs("u_default", default_model=None)
     row = db.get_user_prefs("u_default")
     assert row is not None  # row still exists, but default_model cleared
@@ -77,9 +77,9 @@ def test_upsert_user_prefs_clears_when_none(db):
 
 
 def test_upsert_user_prefs_is_per_user(db):
-    db.upsert_user_prefs("u_alice", default_model="claude-sonnet-4-5")
-    db.upsert_user_prefs("u_bob", default_model="claude-opus-4-5")
+    db.upsert_user_prefs("u_alice", default_model="sonnet")
+    db.upsert_user_prefs("u_bob", default_model="opus")
     a = db.get_user_prefs("u_alice")
     b = db.get_user_prefs("u_bob")
-    assert a is not None and a.default_model == "claude-sonnet-4-5"
-    assert b is not None and b.default_model == "claude-opus-4-5"
+    assert a is not None and a.default_model == "sonnet"
+    assert b is not None and b.default_model == "opus"
