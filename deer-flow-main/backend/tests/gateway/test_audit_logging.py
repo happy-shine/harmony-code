@@ -203,3 +203,93 @@ def test_audit_result_captures_exit_code_from_adapter_error(migrated_data_dir, m
     # Natural EOF (generator exhausted) but CC reported nonzero exit.
     assert result["disposition"] == "natural"
     assert result["exit_code"] == 7
+
+
+def test_audit_result_disposition_disconnected(migrated_data_dir, monkeypatch, caplog):
+    """Client disconnects mid-stream: the ``if await request.is_disconnected()``
+    branch fires, ``event_gen`` breaks out of the ``async for`` (so the
+    ``for ... else`` does NOT run) and sets ``disposition = "disconnected"``
+    and ``exit_code = -1``. The result audit line must reflect both."""
+    # Monkeypatch Request.is_disconnected to return True on the second call
+    # (first call runs after the init frame yields; second runs after the
+    # result frame yields and triggers the break). Must be async.
+    from starlette.requests import Request
+
+    call_count = {"n": 0}
+
+    async def fake_is_disconnected(self):
+        call_count["n"] += 1
+        return call_count["n"] >= 2
+
+    monkeypatch.setattr(Request, "is_disconnected", fake_is_disconnected)
+
+    _install_fake_adapter(
+        monkeypatch,
+        events=[
+            {"type": "system", "subtype": "init", "session_id": "s_disc"},
+            {"type": "assistant", "message": {"content": "partial"}},
+            # Never reached — break fires after the second is_disconnected check.
+            {"type": "result", "total_cost_usd": 0.01},
+        ],
+    )
+
+    caplog.set_level(logging.INFO, logger="harmony.audit")
+
+    from app.gateway.harmony_app import app
+
+    client = TestClient(app)
+    tid = client.post("/api/threads", json={}).json()["id"]
+
+    with client.stream("POST", f"/api/threads/{tid}/messages", json={"content": "x"}) as resp:
+        assert resp.status_code == 200
+        for _ in resp.iter_text():
+            pass
+
+    lines = _parse_audit_lines(caplog)
+    assert len(lines) == 2, f"expected exactly 2 audit lines, got {lines!r}"
+    _, result = lines
+    assert result["event"] == "cc.result"
+    assert result["disposition"] == "disconnected"
+    assert result["exit_code"] == -1
+    # session_id was still captured from the init frame before the break.
+    assert result["session_id"] == "s_disc"
+
+
+def test_audit_result_disposition_error(migrated_data_dir, monkeypatch, caplog):
+    """Adapter raises mid-stream: ``event_gen``'s ``finally`` still fires,
+    disposition stays ``"error"`` (never flipped to "natural" or
+    "disconnected"), and exit_code is normalized to -1."""
+
+    async def fake_run_that_raises(self, cfg):
+        yield {"type": "system", "subtype": "init", "session_id": "s_boom"}
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("app.cc_adapter.adapter.CCAdapter.run", fake_run_that_raises)
+
+    caplog.set_level(logging.INFO, logger="harmony.audit")
+
+    from app.gateway.harmony_app import app
+
+    client = TestClient(app)
+    tid = client.post("/api/threads", json={}).json()["id"]
+
+    # The exception propagates out of event_gen. sse-starlette / TestClient
+    # may surface it as an exception on the client side OR just terminate
+    # the stream — the observable signal we care about is the audit line
+    # emitted from event_gen's ``finally`` block, which runs regardless.
+    try:
+        with client.stream("POST", f"/api/threads/{tid}/messages", json={"content": "x"}) as resp:
+            # status may or may not reach 200 depending on how soon the
+            # exception surfaces; drain whatever we can and move on.
+            for _ in resp.iter_text():
+                pass
+    except Exception:
+        pass
+
+    lines = _parse_audit_lines(caplog)
+    # spawn fires before event_gen starts, result fires from the finally.
+    assert len(lines) == 2, f"expected exactly 2 audit lines, got {lines!r}"
+    _, result = lines
+    assert result["event"] == "cc.result"
+    assert result["disposition"] == "error"
+    assert result["exit_code"] == -1
