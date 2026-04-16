@@ -16,7 +16,7 @@ async def test_client_disconnect_allows_new_message(gateway_server):
     """After client disconnects mid-stream, a new message on same thread must succeed
     (no 409 thread_busy from an orphaned inflight entry)."""
     base = gateway_server.url
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, cookies=gateway_server.auth_cookies) as client:
         r_thread = await client.post(f"{base}/api/threads", json={})
         assert r_thread.status_code == 200
         tid = r_thread.json()["id"]
@@ -56,7 +56,7 @@ async def test_client_disconnect_allows_new_message(gateway_server):
 async def test_cancel_endpoint_returns_no_inflight_when_idle(gateway_server):
     """Stub cancel endpoint on idle thread returns {canceled: False, reason: no_inflight}."""
     base = gateway_server.url
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, cookies=gateway_server.auth_cookies) as client:
         tid = (await client.post(f"{base}/api/threads", json={})).json()["id"]
         r = await client.post(f"{base}/api/threads/{tid}/cancel")
         assert r.status_code == 200

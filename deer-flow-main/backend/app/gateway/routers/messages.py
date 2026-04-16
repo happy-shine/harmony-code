@@ -13,7 +13,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -49,7 +49,7 @@ _inflight_lock = asyncio.Lock()
 
 
 @router.post("/threads")
-def create_thread() -> dict:
+def create_thread(user_id: str = Depends(current_user_id)) -> dict:
     from uuid import uuid4
 
     tid = f"t_{uuid4().hex[:12]}"
@@ -62,7 +62,12 @@ def create_thread() -> dict:
 
 
 @router.post("/threads/{tid}/messages")
-async def send_message(tid: str, body: SendMessageBody, request: Request):
+async def send_message(
+    tid: str,
+    body: SendMessageBody,
+    request: Request,
+    user_id: str = Depends(current_user_id),
+):
     store = _store()
     row = store.get(tid)
     if row is None:
@@ -85,7 +90,6 @@ async def send_message(tid: str, body: SendMessageBody, request: Request):
     # never fires — so we must release ``_inflight`` ourselves, otherwise
     # the thread is wedged at 409 until server restart.
     try:
-        user_id = current_user_id()
         data_dir = _data_dir()
         tmp_root = data_dir / "tmp"
         tmp_root.mkdir(parents=True, exist_ok=True)
@@ -144,7 +148,7 @@ async def send_message(tid: str, body: SendMessageBody, request: Request):
 
 
 @router.post("/threads/{tid}/cancel")
-async def cancel_thread(tid: str):
+async def cancel_thread(tid: str, user_id: str = Depends(current_user_id)):
     """Explicit cancel. M1 scope: this is a status stub only.
 
     CC actually dies via the client-disconnect path (SSE stream abort → sse-starlette

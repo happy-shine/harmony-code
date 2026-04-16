@@ -280,7 +280,9 @@ def test_path_escape_blocked_via_real_server(gateway_server, tmp_path):
     import httpx
 
     (tmp_path / "secret.txt").write_text("pwned")
-    with httpx.Client(base_url=gateway_server.url, timeout=5.0) as h:
+    with httpx.Client(
+        base_url=gateway_server.url, timeout=5.0, cookies=gateway_server.auth_cookies
+    ) as h:
         tid = h.post("/api/threads", json={}).json()["id"]
         r = h.get(f"/api/threads/{tid}/workspace/files/..%2F..%2F..%2Fsecret.txt")
     assert r.status_code in (400, 403, 404), (r.status_code, r.text)
@@ -291,7 +293,9 @@ def test_download_happy_via_real_server(gateway_server, tmp_path):
     """Smoke end-to-end: create thread, write file, GET via the real server."""
     import httpx
 
-    with httpx.Client(base_url=gateway_server.url, timeout=5.0) as h:
+    with httpx.Client(
+        base_url=gateway_server.url, timeout=5.0, cookies=gateway_server.auth_cookies
+    ) as h:
         created = h.post("/api/threads", json={}).json()
         cwd = Path(created["cwd"])
         (cwd / "note.md").write_text("# smoke")
