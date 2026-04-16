@@ -8,7 +8,6 @@ import {
   initialMessageState,
   messageReducer,
   type MessageState,
-  type UIMessage,
 } from "@/core/messages/cc-reducer";
 
 /** Helper: feed a sequence of events through the reducer. */
@@ -257,6 +256,45 @@ describe("messageReducer", () => {
         expect(block.status).toBe("error");
         expect(block.result).toBe("command not found");
       }
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // Extra: preserves backfilled tool_result when assistant re-sends same id
+  // -----------------------------------------------------------------------
+  it("preserves backfilled tool_result when assistant re-sends same message.id", () => {
+    let s = initialMessageState();
+    // 1. assistant with tool_use
+    s = messageReducer(s, { type: "ingest", event: {
+      type: "assistant",
+      message: { id: "m1", content: [{ type: "tool_use", id: "tu1", name: "Read", input: { path: "x" } }] }
+    } as any });
+    // 2. user with tool_result
+    s = messageReducer(s, { type: "ingest", event: {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "tu1", content: "file content", is_error: false }] }
+    } as any });
+    // 3. assistant re-sends same message.id with tool_use + new text
+    s = messageReducer(s, { type: "ingest", event: {
+      type: "assistant",
+      message: { id: "m1", content: [
+        { type: "tool_use", id: "tu1", name: "Read", input: { path: "x" } },
+        { type: "text", text: "Here is the file" }
+      ] }
+    } as any });
+
+    const am = s.messages.find(m => m.kind === "assistant");
+    expect(am).toBeDefined();
+    if (am?.kind === "assistant") {
+      const tu = am.blocks.find(b => b.kind === "tool_use");
+      // tool_result backfill must survive the re-send
+      if (tu?.kind === "tool_use") {
+        expect(tu.status).toBe("ok");
+        expect(tu.result).toBe("file content");
+      }
+      // new text block must also appear
+      const txt = am.blocks.find(b => b.kind === "text");
+      expect(txt).toBeDefined();
     }
   });
 

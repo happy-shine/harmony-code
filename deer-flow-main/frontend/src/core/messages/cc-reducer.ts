@@ -35,7 +35,7 @@ export type UIBlock =
       name: string;
       input: unknown;
       status: "running" | "ok" | "error";
-      result?: string | unknown;
+      result?: unknown;
     };
 
 // ---------------------------------------------------------------------------
@@ -162,7 +162,7 @@ function mergeBlocks(prev: UIBlock[], next: UIBlock[]): UIBlock[] {
   // Build a lookup of previously-backfilled tool_use data by id
   const prevToolData = new Map<
     string,
-    { status: "running" | "ok" | "error"; result?: string | unknown }
+    { status: "running" | "ok" | "error"; result?: unknown }
   >();
   for (const b of prev) {
     if (b.kind === "tool_use" && b.status !== "running") {
@@ -293,7 +293,7 @@ function handleUser(state: MessageState, evt: CCUserEvent): MessageState {
     if (text) {
       const msg: UIMessage = {
         kind: "user",
-        id: `user-${Date.now()}`,
+        id: `user-${state.messages.length}`,
         text,
         attachments: [],
       };
