@@ -1,4 +1,11 @@
-"""harmony schema"""
+"""harmony schema: initial tables for MCP / skills / user prefs / thread sessions.
+
+Note: ``cc_thread_session`` is included here for forward-compat with M5
+(consolidated thread table). Until M5, the gateway's raw-sqlite3
+``SessionStore`` in ``app/cc_adapter/session_store.py`` continues to write
+to a separate ``sessions.db`` file. The alembic-managed ``cc_thread_session``
+table in ``harmony.db`` is therefore present but unused in M3/M4.
+"""
 from alembic import op
 import sqlalchemy as sa
 
@@ -18,7 +25,7 @@ def upgrade():
         sa.Column("url", sa.String, nullable=True),
         sa.Column("headers_json", sa.String, nullable=True),
         sa.Column("env_json", sa.String, nullable=True),
-        sa.Column("enabled", sa.Boolean, default=True),
+        sa.Column("enabled", sa.Boolean, nullable=False, server_default=sa.true(), default=True),
         sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
     )
     op.create_index("ix_mcp_user_name", "mcp_servers", ["user_id", "name"], unique=True)
@@ -30,7 +37,7 @@ def upgrade():
         sa.Column("name", sa.String, nullable=False),
         sa.Column("source", sa.String, nullable=False),
         sa.Column("path", sa.String, nullable=False),
-        sa.Column("enabled", sa.Boolean, default=True),
+        sa.Column("enabled", sa.Boolean, nullable=False, server_default=sa.true(), default=True),
         sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
     )
     op.create_index("ix_skills_user_name", "skills", ["user_id", "name"], unique=True)
