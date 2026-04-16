@@ -227,3 +227,35 @@ def test_migration_is_idempotent_on_rerun(db, tmp_path, caplog):
     # And a "skipping" log line should have been emitted for each name.
     skip_msgs = [r for r in caplog.records if "skip" in r.message.lower()]
     assert len(skip_msgs) >= 2
+
+
+# --- 6. $ENV_VAR expansion ------------------------------------------------
+
+
+def test_env_var_placeholder_is_expanded_before_insert(db, tmp_path, monkeypatch):
+    """``$FOO`` tokens inside env values resolve to the live environment
+    variable (delegated to ExtensionsConfig.from_file)."""
+    from scripts.migrate_extensions_config import main
+
+    monkeypatch.setenv("HARMONY_TEST_API_KEY", "s3cr3t")
+
+    path = _write_config(
+        tmp_path,
+        {
+            "mcpServers": {
+                "with_key": {
+                    "type": "stdio",
+                    "command": "svc",
+                    "env": {"API_KEY": "$HARMONY_TEST_API_KEY"},
+                }
+            },
+            "skills": {},
+        },
+    )
+    rc = main(["--config", str(path)])
+    assert rc == 0
+
+    rows = db.list_mcp_for_user(user_id="u_default")
+    assert len(rows) == 1
+    env = json.loads(rows[0].env_json)
+    assert env == {"API_KEY": "s3cr3t"}
