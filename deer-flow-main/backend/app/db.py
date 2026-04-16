@@ -65,6 +65,21 @@ class SkillRow:
     enabled: bool
 
 
+@dataclass
+class UserPrefsRow:
+    """One row of ``user_prefs`` as consumed by the ``/api/models`` router
+    and ``send_message`` (reads ``default_model`` to set ``SpawnConfig.model``).
+
+    ``extras_json`` is a forward-compat slot reserved for M4+ preferences
+    (theme, timezone, etc.); deliberately not surfaced through the HTTP API
+    in M3.
+    """
+
+    user_id: str
+    default_model: str | None
+    extras_json: str | None
+
+
 class Db:
     """Thin SQLAlchemy wrapper exposing only what routers/compose need.
 
@@ -304,3 +319,62 @@ class Db:
         sql = f"UPDATE skills SET {', '.join(sets)} WHERE id = :id"
         with self.engine.begin() as conn:
             conn.execute(text(sql), params)
+
+    # ------------------------------------------------------------------
+    # User prefs (M3 task 3.6)
+    # ------------------------------------------------------------------
+    def get_user_prefs(self, user_id: str) -> UserPrefsRow | None:
+        """Return the ``user_prefs`` row for ``user_id`` or ``None`` if absent.
+
+        A missing row and a row with ``default_model IS NULL`` are
+        semantically different: the former means the user has never
+        touched their model preference (use whatever default CC picks),
+        the latter means they explicitly cleared it (same effect, but
+        ``send_message`` still checks the row to decide).
+        """
+        sql = (
+            "SELECT user_id, default_model, extras_json "
+            "FROM user_prefs WHERE user_id = :uid"
+        )
+        with self.engine.connect() as conn:
+            row = conn.execute(text(sql), {"uid": user_id}).mappings().first()
+        if row is None:
+            return None
+        return UserPrefsRow(**dict(row))
+
+    def upsert_user_prefs(
+        self,
+        user_id: str,
+        *,
+        default_model: str | None = ...,  # type: ignore[assignment]
+    ) -> None:
+        """Insert-or-update ``user_prefs`` for ``user_id``.
+
+        ``default_model`` uses a sentinel (``...``) to distinguish
+        "not provided" from "explicitly set to None". In practice the
+        router only ever passes it, but keeping the sentinel leaves room
+        for M4 to add more pref fields without revisiting the signature.
+        """
+        existing = self.get_user_prefs(user_id)
+        if existing is None:
+            dm = None if default_model is ... else default_model
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO user_prefs (user_id, default_model, extras_json)
+                        VALUES (:uid, :dm, NULL)
+                        """
+                    ),
+                    {"uid": user_id, "dm": dm},
+                )
+            return
+        if default_model is ...:
+            return  # nothing to update
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE user_prefs SET default_model = :dm WHERE user_id = :uid"
+                ),
+                {"uid": user_id, "dm": default_model},
+            )
