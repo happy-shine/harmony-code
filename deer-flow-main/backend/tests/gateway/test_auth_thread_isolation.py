@@ -144,6 +144,59 @@ def test_uploads_post_rejects_other_user_404(client):
     assert r.status_code == 404, r.text
 
 
+def test_upload_from_non_owner_rejected_before_body_parsed(client):
+    """Regression: 404 must fire before multipart bytes are buffered.
+
+    Before the fix the ownership check lived inside the handler, so
+    FastAPI would parse the full ``list[UploadFile] = File(...)`` body
+    (spooling up to 100 MB per file to a tempfile) **before** we rejected
+    the request. An authenticated attacker could probe any tid they
+    didn't own and force the gateway to buffer the bytes pre-rejection.
+
+    The fix moves the ownership check to a route-level dependency that
+    runs before body parsing. We can't easily assert on FastAPI
+    internals, but we *can* confirm the observable side-effects of the
+    handler never happened:
+
+    * a 404 came back,
+    * no row was inserted into the ``uploads`` table,
+    * the uploads directory on disk holds no file (or doesn't exist).
+    """
+    c, tmp = client
+    tid = _alice_creates_thread(c)
+    _login_as("u_mallory")
+
+    r = c.post(
+        f"/api/threads/{tid}/uploads",
+        files=[("files", ("evil.txt", b"x" * 4096, "text/plain"))],
+    )
+    assert r.status_code == 404, r.text
+
+    # No DB row — the handler was short-circuited by the dep.
+    from app.db import Db, get_engine
+
+    db = Db(get_engine(tmp))
+    assert db.list_uploads_for_thread(tid) == []
+
+    # No file on disk either. Directory may or may not exist (the
+    # handler used to ``mkdir(exist_ok=True)`` on its path — post-fix
+    # we never reach that line). Accept either.
+    uploads_dir = tmp / "threads" / tid / "user-data" / "uploads"
+    if uploads_dir.exists():
+        assert list(uploads_dir.iterdir()) == []
+
+    # Stronger regression: the ownership guard must be a non-body
+    # dependency on the POST route, so FastAPI resolves it *before*
+    # parsing the multipart body. Inspecting the route signature
+    # catches someone reverting the fix even if the side-effect checks
+    # above happen to still hold.
+    from app.gateway.routers.uploads import _require_owned_tid, router
+
+    post_route = next(r for r in router.routes if "POST" in getattr(r, "methods", set()) and r.path.endswith("/uploads"))
+    dep_calls = {d.call for d in post_route.dependant.dependencies}
+    assert _require_owned_tid in dep_calls, "POST /uploads must gate ownership via a dependency so the check runs before multipart body parsing; otherwise a non-owner can force the gateway to buffer their payload pre-rejection."
+
+
 def test_uploads_list_rejects_other_user_404(client):
     c, _ = client
     tid = _alice_creates_thread(c)

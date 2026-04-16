@@ -126,6 +126,24 @@ def _thread_owned_by(tid: str, user_id: str) -> bool:
     return row is not None and row.user_id == user_id
 
 
+def _require_owned_tid(tid: str, user_id: str = Depends(current_user_id)) -> str:
+    """Reject the request with 404 if ``tid`` is absent or not owned by
+    the authenticated user. Returns ``user_id`` so handlers can consume
+    it via the same ``Depends``.
+
+    Used as a route-level dependency on the multipart POST so FastAPI
+    runs the ownership check **before** parsing the body. Without this,
+    ``list[UploadFile] = File(...)`` spools every byte to a
+    SpooledTemporaryFile before the handler body gets a chance to 404,
+    letting an authenticated attacker force the gateway to buffer up
+    to ``MAX_UPLOAD_BYTES`` per file against any ``tid`` they can
+    guess. See :func:`_thread_owned_by` for the ownership semantics.
+    """
+    if not _thread_owned_by(tid, user_id):
+        raise HTTPException(404, "thread_not_found")
+    return user_id
+
+
 def _row_to_out(r: UploadRow, *, include_created_at: bool = True) -> UploadOut:
     # ``created_at`` arrives as a ``datetime`` when the DB driver has typed
     # conversion wired up, or as a raw string from SQLite's text()
@@ -154,7 +172,7 @@ def _row_to_out(r: UploadRow, *, include_created_at: bool = True) -> UploadOut:
 async def upload_files(
     tid: str,
     files: list[UploadFile] = File(...),
-    user_id: str = Depends(current_user_id),
+    user_id: str = Depends(_require_owned_tid),
 ) -> list[UploadOut]:
     """Persist each uploaded file and insert a ``uploads`` row.
 
@@ -163,9 +181,11 @@ async def upload_files(
     writing any bytes), then stream each body to disk with a size
     check. If a later file fails size, the earlier files on disk
     remain; the caller can DELETE them via the returned ids.
+
+    Ownership is enforced by :func:`_require_owned_tid` as a
+    dependency so the 404 fires before FastAPI parses the multipart
+    body — see that function's docstring for the DoS reasoning.
     """
-    if not _thread_owned_by(tid, user_id):
-        raise HTTPException(404, "thread_not_found")
     if not files:
         raise HTTPException(400, "no_files")
 
