@@ -21,8 +21,8 @@ subprocess per message and streams its stream-json as SSE.
 - `app/auth/` — password hashing + better-auth-style session cookies;
   `app/admin/` — CLI (`python -m app.admin create-user`, etc.).
 - `app/audit.py` + `app/audit_events.py` — emit `cc.spawn` / `cc.result`
-  on the `harmony.audit` logger. `app/skills/`, `app/channels/`,
-  `app/model_catalog.py` — router support logic.
+  on the `harmony.audit` logger. `app/skills/`, `app/model_catalog.py`
+  — router support logic.
 
 ## Invariants — do not break
 
@@ -35,10 +35,12 @@ subprocess per message and streams its stream-json as SSE.
 - **No PII in audit.** `cc.spawn` / `cc.result` MUST NOT include prompt
   text, tool output, or the argv slice containing the prompt. Keep to
   ids, hashes, counts, durations, costs, disposition.
-- **ENV_PASSTHROUGH allowlist** in `cc_adapter/adapter.py` (PATH/HOME/
-  LANG/LC_ALL/TZ + `CLAUDE_CODE_*`). AWS/GCP/`*_TOKEN`/`*_KEY`/
-  `DATABASE_URL`/`REDIS_URL`/OPENAI/ANTHROPIC/GITHUB creds are explicitly
-  blocked. Do not widen without review.
+- **ENV_PASSTHROUGH is an allowlist** in `cc_adapter/adapter.py`
+  (`PATH`/`HOME`/`LANG`/`LC_ALL`/`TZ` + the `CLAUDE_CODE_*` prefix).
+  Everything else — `AWS_*`, `GCP_*`, `*_TOKEN`, `*_KEY`,
+  `DATABASE_URL`, `REDIS_URL`, `OPENAI_*`, `ANTHROPIC_*`,
+  `GITHUB_TOKEN`, etc. — is dropped by default. Do not widen the
+  allowlist without security review.
 - **Migrations run first.** Alembic must be applied before the server
   starts. `sessions.db` self-migrates via `ALTER TABLE` in
   `session_store.ensure_schema`.
@@ -49,11 +51,11 @@ subprocess per message and streams its stream-json as SSE.
 ## Reading order for a new task
 
 1. `README.md` in the repo root — install, env vars, how to run.
-2. `docs/plans/cc-cli-notes.md` — canonical CC CLI flags, event shapes,
+2. `../../docs/plans/cc-cli-notes.md` — canonical CC CLI flags, event shapes,
    jsonl location, MCP + skill discovery. Source of truth for anything
    the adapter does.
 3. The router for the endpoint you are touching, then follow into
    `cc_adapter/` if the change is below the gateway.
 
-`docs/plans/2026-04-15-harmony-code-{design,plan}.md` are historical;
+`../../docs/plans/2026-04-15-harmony-code-{design,plan}.md` are historical;
 optional background, not required reading.
