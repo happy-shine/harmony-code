@@ -26,3 +26,6 @@ config.yaml
 
 # Claude Code settings
 .claude/settings.local.json
+
+# harmony-code data dir (sqlite DB etc.)
+.harmony-data*
