@@ -27,7 +27,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { ArtifactsProvider } from "@/components/workspace/artifacts";
 import { MessageList } from "@/components/workspace/messages";
 import { ThreadContext } from "@/components/workspace/messages/context";
 import type { Agent } from "@/core/agents";
@@ -350,9 +349,8 @@ export default function NewAgentPage() {
 
   return (
     <ThreadContext.Provider value={{ thread }}>
-      <ArtifactsProvider>
-        <div className="flex size-full flex-col">
-          {header}
+      <div className="flex size-full flex-col">
+        {header}
 
           <main className="flex min-h-0 flex-1 flex-col">
             {showSaveHint ? (
@@ -414,9 +412,8 @@ export default function NewAgentPage() {
                 )}
               </div>
             </div>
-          </main>
-        </div>
-      </ArtifactsProvider>
+        </main>
+      </div>
     </ThreadContext.Provider>
   );
 }

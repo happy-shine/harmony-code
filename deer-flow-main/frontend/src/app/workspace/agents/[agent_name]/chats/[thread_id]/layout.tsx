@@ -1,7 +1,7 @@
 "use client";
 
+// ArtifactsProvider removed in M4.4; files live in the workspace file browser.
 import { PromptInputProvider } from "@/components/ai-elements/prompt-input";
-import { ArtifactsProvider } from "@/components/workspace/artifacts";
 import { SubtasksProvider } from "@/core/tasks/context";
 
 export default function AgentChatLayout({
@@ -11,9 +11,7 @@ export default function AgentChatLayout({
 }) {
   return (
     <SubtasksProvider>
-      <ArtifactsProvider>
-        <PromptInputProvider>{children}</PromptInputProvider>
-      </ArtifactsProvider>
+      <PromptInputProvider>{children}</PromptInputProvider>
     </SubtasksProvider>
   );
 }

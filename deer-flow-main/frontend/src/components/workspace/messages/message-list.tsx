@@ -20,7 +20,6 @@ import { useUpdateSubtask } from "@/core/tasks/context";
 import type { AgentThreadState } from "@/core/threads";
 import { cn } from "@/lib/utils";
 
-import { ArtifactFileList } from "../artifacts/artifact-file-list";
 import { StreamingIndicator } from "../streaming-indicator";
 
 import { MarkdownContent } from "./markdown-content";
@@ -98,7 +97,17 @@ export function MessageList({
                     className="mb-4"
                   />
                 )}
-                <ArtifactFileList files={files} threadId={threadId} />
+                {/* Artifact file list removed (M4.4); files live in the
+                    workspace file browser now. Keep a minimal inline list so
+                    this legacy present-files branch still renders a readable
+                    fallback until M5 replaces the message list entirely. */}
+                {files.length > 0 && (
+                  <ul className="text-muted-foreground list-inside list-disc text-sm">
+                    {files.map((file) => (
+                      <li key={file}>{file}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
             );
           } else if (group.type === "assistant:subagent") {

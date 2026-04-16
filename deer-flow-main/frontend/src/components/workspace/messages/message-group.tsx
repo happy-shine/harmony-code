@@ -33,7 +33,6 @@ import { extractTitleFromMarkdown } from "@/core/utils/markdown";
 import { env } from "@/env";
 import { cn } from "@/lib/utils";
 
-import { useArtifacts } from "../artifacts";
 import { FlipDisplay } from "../flip-display";
 import { Tooltip } from "../tooltip";
 
@@ -185,12 +184,9 @@ export function MessageGroup({
 
 function ToolCall({
   id,
-  messageId,
   name,
   args,
   result,
-  isLast = false,
-  isLoading = false,
 }: {
   id?: string;
   messageId?: string;
@@ -201,8 +197,6 @@ function ToolCall({
   isLoading?: boolean;
 }) {
   const { t } = useI18n();
-  const { setOpen, autoOpen, autoSelect, selectedArtifact, select } =
-    useArtifacts();
 
   if (name === "web_search") {
     let label: React.ReactNode = t.toolCalls.searchForRelatedInfo;
@@ -336,33 +330,14 @@ function ToolCall({
       description = t.toolCalls.writeFile;
     }
     const path: string | undefined = (args as { path: string })?.path;
-    if (isLoading && isLast && autoOpen && autoSelect && path) {
-      setTimeout(() => {
-        const url = new URL(
-          `write-file:${path}?message_id=${messageId}&tool_call_id=${id}`,
-        ).toString();
-        if (selectedArtifact === url) {
-          return;
-        }
-        select(url, true);
-        setOpen(true);
-      }, 100);
-    }
+    // Artifacts panel removed (M4.4); write-file tool calls no longer auto-open
+    // a side panel. Files show up in the workspace file browser instead.
 
     return (
       <ChainOfThoughtStep
         key={id}
-        className="cursor-pointer"
         label={description}
         icon={NotebookPenIcon}
-        onClick={() => {
-          select(
-            new URL(
-              `write-file:${path}?message_id=${messageId}&tool_call_id=${id}`,
-            ).toString(),
-          );
-          setOpen(true);
-        }}
       >
         {path && (
           <ChainOfThoughtSearchResult className="cursor-pointer">

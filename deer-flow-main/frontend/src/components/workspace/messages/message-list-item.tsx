@@ -17,7 +17,6 @@ import {
 } from "@/components/ai-elements/reasoning";
 import { Task, TaskTrigger } from "@/components/ai-elements/task";
 import { Badge } from "@/components/ui/badge";
-import { resolveArtifactURL } from "@/core/artifacts/utils";
 import { useI18n } from "@/core/i18n/hooks";
 import {
   extractContentFromMessage,
@@ -100,7 +99,11 @@ function MessageImage({
     return <img className={imgClassName} src={src} alt={alt} {...props} />;
   }
 
-  const url = src.startsWith("/mnt/") ? resolveArtifactURL(src, threadId) : src;
+  // Artifact URL resolution removed (M4.4); /mnt/ paths are handled via the
+  // workspace file browser now. Pass src through so this legacy renderer still
+  // compiles until the LangGraph-shaped message list is replaced in M5.
+  void threadId;
+  const url = src;
 
   return (
     <a href={url} target="_blank" rel="noopener noreferrer">
@@ -343,7 +346,10 @@ function RichFileCard({
 
   if (!file.path) return null;
 
-  const fileUrl = resolveArtifactURL(file.path, threadId);
+  // Artifact URL resolution removed (M4.4); see note above. Use the raw path
+  // until this component is replaced in M5.
+  void threadId;
+  const fileUrl = file.path;
 
   if (isImage) {
     return (

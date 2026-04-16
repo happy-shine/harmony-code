@@ -7,7 +7,6 @@ import { useCallback, useState } from "react";
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
 import { AgentWelcome } from "@/components/workspace/agent-welcome";
-import { ArtifactTrigger } from "@/components/workspace/artifacts";
 import { ChatBox, useThreadChat } from "@/components/workspace/chats";
 import { ExportTrigger } from "@/components/workspace/export-trigger";
 import { InputBox } from "@/components/workspace/input-box";
@@ -130,7 +129,6 @@ export default function AgentChatPage() {
               </Tooltip>
               <TokenUsageIndicator messages={thread.messages} />
               <ExportTrigger threadId={threadId} />
-              <ArtifactTrigger />
             </div>
           </header>
 
