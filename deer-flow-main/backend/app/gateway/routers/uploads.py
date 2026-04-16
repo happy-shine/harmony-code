@@ -107,15 +107,22 @@ def _normalize_filename(name: str | None) -> str:
     return stripped
 
 
-def _thread_exists(tid: str) -> bool:
-    """A thread "exists" iff its ``cc_thread_session`` row is present.
+def _thread_owned_by(tid: str, user_id: str) -> bool:
+    """A thread is accessible to ``user_id`` iff its ``cc_thread_session``
+    row is present AND its ``user_id`` column equals ``user_id``.
+
+    Treats both "no such row" and "not yours" as the same False result —
+    callers raise a single 404 so the endpoint doesn't leak existence
+    across users (Task 5.3). Pre-5.3 rows with ``user_id IS NULL`` are
+    unreachable to every authenticated user.
 
     We don't check the directory: ``create_thread`` creates both the row
     and the dir atomically (well, sequentially — the dir first). A
     missing dir for an existing row means someone nuked it out-of-band,
     which we tolerate (``mkdir(exist_ok=True)`` at write time).
     """
-    return session_store().get(tid) is not None
+    row = session_store().get(tid)
+    return row is not None and row.user_id == user_id
 
 
 def _row_to_out(r: UploadRow, *, include_created_at: bool = True) -> UploadOut:
@@ -156,7 +163,7 @@ async def upload_files(
     check. If a later file fails size, the earlier files on disk
     remain; the caller can DELETE them via the returned ids.
     """
-    if not _thread_exists(tid):
+    if not _thread_owned_by(tid, user_id):
         raise HTTPException(404, "thread_not_found")
     if not files:
         raise HTTPException(400, "no_files")
@@ -224,9 +231,9 @@ async def upload_files(
 @router.get("", response_model=list[UploadOut])
 def list_uploads(
     tid: str,
-    user_id: str = Depends(current_user_id),  # noqa: ARG001 - future auth scope
+    user_id: str = Depends(current_user_id),
 ) -> list[UploadOut]:
-    if not _thread_exists(tid):
+    if not _thread_owned_by(tid, user_id):
         raise HTTPException(404, "thread_not_found")
     rows = get_db().list_uploads_for_thread(tid)
     return [_row_to_out(r) for r in rows]
@@ -236,7 +243,7 @@ def list_uploads(
 def delete_upload(
     tid: str,
     upload_id: str,
-    user_id: str = Depends(current_user_id),  # noqa: ARG001 - future auth scope
+    user_id: str = Depends(current_user_id),
 ) -> dict[str, Any]:
     """Delete DB row + on-disk file. DB-first: filesystem failure is logged.
 
@@ -245,7 +252,7 @@ def delete_upload(
     disk is strictly better than leaving a dangling row that points at
     nothing (which would confuse list + re-uploads with the same name).
     """
-    if not _thread_exists(tid):
+    if not _thread_owned_by(tid, user_id):
         raise HTTPException(404, "thread_not_found")
     db = get_db()
     row = db.get_upload(upload_id)

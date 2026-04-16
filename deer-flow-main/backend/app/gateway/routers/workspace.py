@@ -20,9 +20,10 @@ import logging
 import mimetypes
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
+from app.gateway.deps import current_user_id
 from app.gateway.deps import session_store as _store
 
 logger = logging.getLogger(__name__)
@@ -36,10 +37,16 @@ _MAX_DEPTH = 20
 _MAX_NODES = 10_000
 
 
-def _thread_root(tid: str) -> Path:
-    """Resolve ``tid`` → absolute cwd, or raise 404."""
+def _thread_root(tid: str, user_id: str) -> Path:
+    """Resolve ``tid`` → absolute cwd, or raise 404.
+
+    Enforces per-user ownership (Task 5.3): a row belonging to a
+    different user — or a legacy NULL-owner row — 404s identically to
+    "no such thread", so the endpoint doesn't leak thread existence
+    across users.
+    """
     row = _store().get(tid)
-    if row is None:
+    if row is None or row.user_id != user_id:
         raise HTTPException(status_code=404, detail="thread_not_found")
     cwd = Path(row.cwd)
     if not cwd.exists():
@@ -144,9 +151,9 @@ def _walk(cwd: Path) -> list[dict]:
 
 
 @router.get("/tree")
-def get_tree(tid: str) -> dict:
+def get_tree(tid: str, user_id: str = Depends(current_user_id)) -> dict:
     """Return the workspace file tree rooted at ``row.cwd``."""
-    cwd = _thread_root(tid)
+    cwd = _thread_root(tid, user_id)
     return {
         "root": str(cwd),
         "children": _walk(cwd),
@@ -154,9 +161,11 @@ def get_tree(tid: str) -> dict:
 
 
 @router.get("/files/{path:path}")
-def get_file(tid: str, path: str) -> FileResponse:
+def get_file(
+    tid: str, path: str, user_id: str = Depends(current_user_id)
+) -> FileResponse:
     """Stream a file under ``row.cwd``. Path-escape rejected with 400."""
-    cwd = _thread_root(tid)
+    cwd = _thread_root(tid, user_id)
     full = _safe_resolve(cwd, path)
     if not full.exists():
         raise HTTPException(status_code=404, detail="file_not_found")

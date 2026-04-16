@@ -70,8 +70,12 @@ async def send_message(
 ):
     store = _store()
     row = store.get(tid)
-    if row is None:
-        raise HTTPException(404, "thread not found")
+    # Single 404 covers "unknown tid" AND "not-your-tid" — avoid leaking
+    # existence of other users' threads (Task 5.3). ``row.user_id`` is
+    # nullable for pre-5.3 legacy rows; a NULL owner is owned by nobody,
+    # so the comparison below still rejects.
+    if row is None or row.user_id != user_id:
+        raise HTTPException(404, "thread_not_found")
 
     async with _inflight_lock:
         if tid in _inflight:
@@ -149,12 +153,22 @@ async def send_message(
 
 @router.post("/threads/{tid}/cancel")
 async def cancel_thread(tid: str, user_id: str = Depends(current_user_id)):
-    """Explicit cancel. M1 scope: this is a status stub only.
+    """Explicit cancel. Ownership-aware stub.
 
-    CC actually dies via the client-disconnect path (SSE stream abort → sse-starlette
-    closes event_gen → adapter's GeneratorExit handler terminates the subprocess).
-    M5 wires this endpoint to a task registry that can signal an in-flight stream.
+    CC actually dies via the client-disconnect path (SSE stream abort →
+    sse-starlette closes event_gen → adapter's GeneratorExit handler
+    terminates the subprocess). This endpoint still validates ownership
+    so cross-user callers can't use it to probe which thread ids exist or
+    leak the current inflight set. Task 5.3.
+
+    M-future wires the body to a task registry that can signal an
+    in-flight stream; the 404 gate here stays.
     """
+    # Ownership check before touching _inflight. Same 404-for-both rule
+    # as send_message so this endpoint doesn't reveal thread existence.
+    row = _store().get(tid)
+    if row is None or row.user_id != user_id:
+        raise HTTPException(404, "thread_not_found")
     async with _inflight_lock:
         if tid not in _inflight:
             return {"canceled": False, "reason": "no_inflight"}
