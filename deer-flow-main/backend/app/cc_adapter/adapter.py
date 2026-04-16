@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 
@@ -74,16 +75,37 @@ class CCAdapter:
         parser = StreamParser()
         yielded_spawned = False
         try:
-            async for raw in proc.stream():
-                if not yielded_spawned:
-                    # `spawned` fires on the first stdout line, not on fork success —
-                    # a CC process that dies before writing anything will never produce
-                    # this frame. Treat absence of `spawned` as "CC never started talking".
-                    yield {"type": "_adapter", "subtype": "spawned", "pid": proc.pid}
-                    yielded_spawned = True
-                event, _ = parser.feed_line(raw)
-                if event is not None:
-                    yield event
+            # Wrap the stream loop in a wall-clock budget if configured.
+            # ``asyncio.timeout(None)`` is a no-op so the two branches
+            # collapse to one body. Python 3.11+ gives us the context
+            # manager form, which plays nicely with async generators —
+            # ``wait_for`` is clumsier against an ``async for`` body.
+            try:
+                async with asyncio.timeout(cfg.timeout_seconds):
+                    async for raw in proc.stream():
+                        if not yielded_spawned:
+                            # `spawned` fires on the first stdout line, not on fork success —
+                            # a CC process that dies before writing anything will never produce
+                            # this frame. Treat absence of `spawned` as "CC never started talking".
+                            yield {"type": "_adapter", "subtype": "spawned", "pid": proc.pid}
+                            yielded_spawned = True
+                        event, _ = parser.feed_line(raw)
+                        if event is not None:
+                            yield event
+            except TimeoutError:
+                # Timeout: emit synthetic error frame, terminate CC, return
+                # cleanly. We do NOT fall through to the nonzero-exit path
+                # below — our SIGTERM would otherwise produce a false-positive
+                # ``cc_nonzero_exit`` diagnostic on top of the timeout frame.
+                yield {
+                    "type": "_adapter",
+                    "subtype": "error",
+                    "code": "timeout",
+                    "timeout_seconds": cfg.timeout_seconds,
+                }
+                await proc.terminate()
+                await proc.wait()
+                return
             # Natural exit: CC's stdout hit EOF. Safe to yield diagnostics.
             code = await proc.wait()
             if code != 0:
