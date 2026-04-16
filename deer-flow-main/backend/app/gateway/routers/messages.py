@@ -22,7 +22,7 @@ from app.cc_adapter.adapter import CCAdapter
 from app.cc_adapter.compose import compose_mcp_config, compose_skills_dir
 from app.cc_adapter.session_store import SessionStore
 from app.cc_adapter.types import SpawnConfig
-from app.db import Db, get_engine
+from app.gateway.deps import current_user_id, get_db
 
 
 logger = logging.getLogger(__name__)
@@ -45,19 +45,6 @@ def _store() -> SessionStore:
     s = SessionStore(str(p))
     s.ensure_schema()
     return s
-
-
-def _db() -> Db:
-    return Db(get_engine(_data_dir()))
-
-
-def _current_user_id() -> str:
-    """M3 stub. M5 replaces with a real auth dep (better-auth).
-
-    Kept as a plain callable (not ``Depends``) so introducing the real dep
-    later only touches the handler signature.
-    """
-    return "u_default"
 
 
 def _thread_cwd(thread_id: str) -> Path:
@@ -104,12 +91,12 @@ async def send_message(tid: str, body: SendMessageBody, request: Request):
     # never fires — so we must release ``_inflight`` ourselves, otherwise
     # the thread is wedged at 409 until server restart.
     try:
-        user_id = _current_user_id()
+        user_id = current_user_id()
         data_dir = _data_dir()
         tmp_root = data_dir / "tmp"
         tmp_root.mkdir(parents=True, exist_ok=True)
         thread_root = data_dir / "threads" / tid / "user-data"
-        db = _db()
+        db = get_db()
         mcp_path = compose_mcp_config(
             db=db, user_id=user_id, thread_id=tid, tmp_root=tmp_root
         )

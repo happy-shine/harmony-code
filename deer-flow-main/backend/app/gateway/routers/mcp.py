@@ -6,38 +6,21 @@ spawn, so any edit through these endpoints takes effect on the NEXT
 message in any thread — no caching layer to invalidate.
 
 M3 scope: ``user_id`` is stubbed to ``"u_default"`` via
-:func:`_current_user_id`; M5 wires real auth (better-auth).
+:func:`app.gateway.deps.current_user_id`; M5 wires real auth (better-auth).
 """
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.db import Db, McpRow, get_engine
+from app.db import McpRow
+from app.gateway.deps import current_user_id, get_db
 
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
-
-
-# --- Helpers --------------------------------------------------------------
-
-
-def _data_dir() -> Path:
-    return Path(os.environ.get("HARMONY_DATA_DIR", ".harmony-data"))
-
-
-def _current_user_id() -> str:
-    """M3 stub. M5 replaces with ``Depends(real_auth.current_user_id)``."""
-    return "u_default"
-
-
-def _db() -> Db:
-    return Db(get_engine(_data_dir()))
 
 
 # --- Models ---------------------------------------------------------------
@@ -97,15 +80,15 @@ def _row_to_out(r: McpRow) -> MCPServerOut:
 
 
 @router.get("", response_model=list[MCPServerOut])
-def list_mcp(user_id: str = Depends(_current_user_id)) -> list[MCPServerOut]:
-    return [_row_to_out(r) for r in _db().list_mcp_for_user(user_id=user_id)]
+def list_mcp(user_id: str = Depends(current_user_id)) -> list[MCPServerOut]:
+    return [_row_to_out(r) for r in get_db().list_mcp_for_user(user_id=user_id)]
 
 
 @router.post("", response_model=MCPServerOut)
 def create_mcp(
-    body: MCPServerIn, user_id: str = Depends(_current_user_id)
+    body: MCPServerIn, user_id: str = Depends(current_user_id)
 ) -> MCPServerOut:
-    db = _db()
+    db = get_db()
     new_id = db.insert_mcp(
         user_id=user_id,
         name=body.name,
@@ -126,9 +109,9 @@ def create_mcp(
 
 @router.delete("/{mcp_id}")
 def delete_mcp(
-    mcp_id: str, user_id: str = Depends(_current_user_id)
+    mcp_id: str, user_id: str = Depends(current_user_id)
 ) -> dict[str, Any]:
-    db = _db()
+    db = get_db()
     row = db.get_mcp(mcp_id)
     if row is None:
         raise HTTPException(404, "mcp not found")
@@ -144,9 +127,9 @@ def delete_mcp(
 def update_mcp(
     mcp_id: str,
     patch: MCPServerPatch,
-    user_id: str = Depends(_current_user_id),
+    user_id: str = Depends(current_user_id),
 ) -> MCPServerOut:
-    db = _db()
+    db = get_db()
     row = db.get_mcp(mcp_id)
     if row is None:
         raise HTTPException(404, "mcp not found")

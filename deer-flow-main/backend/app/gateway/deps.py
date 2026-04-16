@@ -68,3 +68,27 @@ def get_checkpointer(request: Request):
 def get_store(request: Request):
     """Return the global store (may be ``None`` if not configured)."""
     return getattr(request.app.state, "store", None)
+
+
+# ---------------------------------------------------------------------------
+# Harmony gateway deps (M3+). Everything above this comment is LangGraph-era
+# and will be deleted in M5 along with the runtime it serves.
+# ---------------------------------------------------------------------------
+
+
+def current_user_id() -> str:
+    """M3 stub. M5 replaces with real auth dep (e.g. better-auth session)."""
+    return "u_default"
+
+
+def get_db():
+    """Fresh Db handle per request. SQLAlchemy's engine cache is internal to
+    get_engine(); callers do not need to hold the instance across requests.
+
+    ``get_engine()`` resolves ``HARMONY_DATA_DIR`` from the environment, so
+    this function takes no arguments — tests can monkeypatch the env var to
+    redirect all routers at an isolated tmp dir.
+    """
+    from app.db import Db, get_engine
+
+    return Db(get_engine())
