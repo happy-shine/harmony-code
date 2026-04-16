@@ -56,6 +56,13 @@ def migrate(*, config_path: str | None = None, dry_run: bool = False) -> int:
             return 0
         raise
 
+    mcp_count = len(cfg.mcp_servers)
+    skills_count = len(cfg.skills)
+    logger.info(
+        "loaded extensions config: %d MCP servers, %d skills",
+        mcp_count,
+        skills_count,
+    )
     return 0
 
 

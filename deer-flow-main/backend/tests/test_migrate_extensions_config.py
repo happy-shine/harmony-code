@@ -84,3 +84,24 @@ def test_missing_config_file_is_noop_and_exits_zero(db, tmp_path, caplog):
     assert _count_mcp(db) == 0
     assert _count_skills(db) == 0
     assert any("no extensions config" in r.message.lower() for r in caplog.records)
+
+
+# --- 2. Empty file --------------------------------------------------------
+
+
+def test_empty_config_is_noop_and_logs_counts(db, tmp_path, caplog):
+    """File present but no servers/skills → log "0 servers, 0 skills", no writes."""
+    from scripts.migrate_extensions_config import main
+
+    path = _write_config(tmp_path, {"mcpServers": {}, "skills": {}})
+    with caplog.at_level(logging.INFO):
+        rc = main(["--config", str(path)])
+
+    assert rc == 0
+    assert _count_mcp(db) == 0
+    assert _count_skills(db) == 0
+    # At least one log line must reference the counts (0 MCP, 0 skills).
+    assert any(
+        ("0" in r.message and ("mcp" in r.message.lower() or "server" in r.message.lower()))
+        for r in caplog.records
+    )
