@@ -57,7 +57,7 @@ def create_thread(user_id: str = Depends(current_user_id)) -> dict:
     cwd.mkdir(parents=True, exist_ok=True)
     (cwd.parent / "uploads").mkdir(parents=True, exist_ok=True)
     (cwd.parent / "outputs").mkdir(parents=True, exist_ok=True)
-    _store().create(tid, str(cwd))
+    _store().create(tid, str(cwd), user_id=user_id)
     return {"id": tid, "cwd": str(cwd)}
 
 
