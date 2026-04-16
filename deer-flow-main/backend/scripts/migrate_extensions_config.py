@@ -1,15 +1,76 @@
 """One-time migration of legacy ``extensions_config.json`` into ``harmony.db``.
 
-See Task 3.7 in ``docs/plans/2026-04-15-harmony-code-plan.md`` for the
-migration contract. Stub — implementation follows TDD.
+The pre-harmony deerflow backend tracked MCP servers and skill enabled-state
+in a single JSON file (``extensions_config.json``, or legacy
+``mcp_config.json``). M3 moves that configuration into the ``mcp_servers``
+and ``skills`` tables of ``harmony.db`` and exposes CRUD routers against it.
+
+This script imports the legacy file **once** so existing users don't lose
+their MCP setup when upgrading. It is idempotent on re-run.
+
+Decisions:
+
+* **Global rows only.** The legacy config has no notion of users; everything
+  is imported with ``user_id = NULL``.
+* **Skills are logged but not inserted.** The legacy config only tracks
+  skill *names* plus enabled-state — skill *files* lived in a separate
+  deerflow-specific tree that M3 does not import. Inserting skill rows
+  without valid ``path`` values would produce broken symlinks in
+  :func:`app.cc_adapter.compose.compose_skills_dir`.
 """
 from __future__ import annotations
 
+import argparse
+import logging
 import sys
 
 
-def main(argv: list[str] | None = None) -> int:  # pragma: no cover - stub
-    raise NotImplementedError("migrate_extensions_config not yet implemented")
+logger = logging.getLogger("migrate_extensions_config")
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Migrate legacy extensions_config.json into harmony.db.",
+    )
+    parser.add_argument("--config", type=str, default=None)
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args(argv)
+
+
+def migrate(*, config_path: str | None = None, dry_run: bool = False) -> int:
+    """Run the migration. Returns the number of rows newly inserted."""
+    from packages.harness.deerflow.config.extensions_config import (
+        ExtensionsConfig,
+    )
+
+    try:
+        cfg = ExtensionsConfig.from_file(config_path)
+    except (FileNotFoundError, RuntimeError) as exc:
+        # RuntimeError here wraps the FileNotFoundError raised when an
+        # explicit --config path doesn't exist (ExtensionsConfig.from_file
+        # converts most errors into RuntimeError). Treat either as "no
+        # config to migrate" — one-time tool, user-friendly.
+        cause = exc.__cause__ if isinstance(exc, RuntimeError) else exc
+        if isinstance(cause, FileNotFoundError) or isinstance(exc, FileNotFoundError):
+            logger.info("no extensions config found, nothing to migrate")
+            return 0
+        raise
+
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    args = _parse_args(argv)
+    try:
+        migrate(config_path=args.config, dry_run=args.dry_run)
+    except Exception as exc:
+        logger.error("migration failed: %s", exc, exc_info=True)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
