@@ -105,3 +105,48 @@ def test_empty_config_is_noop_and_logs_counts(db, tmp_path, caplog):
         ("0" in r.message and ("mcp" in r.message.lower() or "server" in r.message.lower()))
         for r in caplog.records
     )
+
+
+# --- 3. Populated file, stdio server --------------------------------------
+
+
+def test_stdio_server_inserts_global_row_with_json_fields(db, tmp_path):
+    """A single stdio server imports as a global row with args+env JSON-serialized."""
+    from scripts.migrate_extensions_config import main
+
+    path = _write_config(
+        tmp_path,
+        {
+            "mcpServers": {
+                "fs": {
+                    "enabled": True,
+                    "type": "stdio",
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                    "env": {"LOG_LEVEL": "debug"},
+                }
+            },
+            "skills": {},
+        },
+    )
+    rc = main(["--config", str(path)])
+
+    assert rc == 0
+    rows = db.list_mcp_for_user(user_id="u_default")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.user_id is None  # global
+    assert row.name == "fs"
+    assert row.transport == "stdio"
+    assert row.command == "npx"
+    assert row.enabled is True
+    # args + env round-trip through JSON columns.
+    assert json.loads(row.args_json) == [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/tmp",
+    ]
+    assert json.loads(row.env_json) == {"LOG_LEVEL": "debug"}
+    # Unused stdio fields stay NULL.
+    assert row.url is None
+    assert row.headers_json is None

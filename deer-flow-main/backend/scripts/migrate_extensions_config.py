@@ -63,7 +63,31 @@ def migrate(*, config_path: str | None = None, dry_run: bool = False) -> int:
         mcp_count,
         skills_count,
     )
-    return 0
+
+    if mcp_count == 0:
+        return 0
+
+    from app.db import Db, get_engine
+
+    db = Db(get_engine())
+
+    inserted = 0
+    for name, server in cfg.mcp_servers.items():
+        db.insert_mcp(
+            user_id=None,
+            name=name,
+            transport=server.type,
+            command=server.command,
+            args=list(server.args) if server.args else None,
+            url=server.url,
+            headers=dict(server.headers) if server.headers else None,
+            env=dict(server.env) if server.env else None,
+            enabled=server.enabled,
+        )
+        inserted += 1
+        logger.info("inserted MCP %r (transport=%s)", name, server.type)
+
+    return inserted
 
 
 def main(argv: list[str] | None = None) -> int:
