@@ -40,7 +40,14 @@ sys.modules["deerflow.subagents.executor"] = _executor_mock
 # (McpConfigResponse) and Tasks 3.5/3.6 will further replace (SkillsListResponse,
 # ModelsListResponse, MemoryConfigResponse, UploadResponse). The whole file is
 # M5 removal scope per backend/CLAUDE.md. Skip collection until M5 deletes it.
-collect_ignore = ["test_client.py"]
+#
+# tests/test_skills_custom_router.py exercises the LangGraph-era custom-skill
+# CRUD endpoints (``/api/skills/custom/...``) that Task 3.5 removed along with
+# the rest of the deerflow.skills-coupled router. The DB-backed replacement
+# covers the same capability via ``/api/skills`` + upload/git install; the old
+# router was bound to ``extensions_config.json`` + markdown-file storage and is
+# M5 removal scope. Skip collection.
+collect_ignore = ["test_client.py", "test_skills_custom_router.py"]
 
 
 @pytest.fixture()

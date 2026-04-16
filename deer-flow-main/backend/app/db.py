@@ -250,3 +250,57 @@ class Db:
         with self.engine.connect() as conn:
             rows = conn.execute(text(sql), {"uid": user_id}).mappings().all()
         return [SkillRow(**{**dict(r), "enabled": bool(r["enabled"])}) for r in rows]
+
+    def list_skills_for_user(self, *, user_id: str) -> list[SkillRow]:
+        """All rows (enabled + disabled) owned by ``user_id`` OR global (``user_id IS NULL``).
+
+        Used by the CRUD router; callers that want only enabled rows for a
+        CC spawn should still use :meth:`query_skills_for_user`.
+        """
+        sql = (
+            "SELECT id, user_id, name, source, path, enabled "
+            "FROM skills "
+            "WHERE (user_id = :uid OR user_id IS NULL) "
+            "ORDER BY name"
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(text(sql), {"uid": user_id}).mappings().all()
+        return [SkillRow(**{**dict(r), "enabled": bool(r["enabled"])}) for r in rows]
+
+    def get_skill(self, skill_id: str) -> SkillRow | None:
+        sql = (
+            "SELECT id, user_id, name, source, path, enabled "
+            "FROM skills WHERE id = :id"
+        )
+        with self.engine.connect() as conn:
+            row = conn.execute(text(sql), {"id": skill_id}).mappings().first()
+        if row is None:
+            return None
+        return SkillRow(**{**dict(row), "enabled": bool(row["enabled"])})
+
+    def delete_skill(self, skill_id: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM skills WHERE id = :id"), {"id": skill_id}
+            )
+
+    def update_skill(self, skill_id: str, patch: dict) -> None:
+        """Update only the columns present in ``patch``.
+
+        Recognized keys: ``name``, ``enabled``. ``source`` and ``path`` are
+        install-time artifacts owned by the installer — to change them the
+        caller should delete the row (+ its skills_store dir) and reinstall.
+        Unknown keys are silently ignored (defensive for forward-compat).
+        """
+        DIRECT = {"name", "enabled"}
+        sets: list[str] = []
+        params: dict = {"id": skill_id}
+        for k, v in patch.items():
+            if k in DIRECT:
+                sets.append(f"{k} = :{k}")
+                params[k] = v
+        if not sets:
+            return
+        sql = f"UPDATE skills SET {', '.join(sets)} WHERE id = :id"
+        with self.engine.begin() as conn:
+            conn.execute(text(sql), params)
