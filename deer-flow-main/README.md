@@ -183,7 +183,7 @@ into
 `$HARMONY_DATA_DIR/skills_store/<skill_id>/` and inserts a row owned by
 the caller. When a thread spawns CC, enabled skills are materialized as
 symlinks under the per-thread `.claude/skills/` directory. Full
-tutorial: `docs/skills-tutorial.md` (Task 6.4).
+tutorial: `docs/skills-tutorial.md`.
 
 **System-wide skill.** Install as a user first to get the
 `skills_store/` layout right, then update the row so `user_id IS NULL`
