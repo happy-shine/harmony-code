@@ -23,8 +23,18 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
-from sqlalchemy import text
+
+# Make the script runnable both from ``backend/`` (``python scripts/...``)
+# and from the repo root (``python backend/scripts/...``). The latter
+# leaves ``backend/`` off sys.path by default, so we prepend it here
+# before any ``app.*`` / ``packages.*`` import.
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+
+from sqlalchemy import text  # noqa: E402  (path adjusted above)
 
 
 logger = logging.getLogger("migrate_extensions_config")
