@@ -19,6 +19,8 @@ export type ParsedFrame =
 // ---------------------------------------------------------------------------
 
 export function parseSSEFrame(frame: string): ParsedFrame {
+  // Note: Per SSE spec, "data:hello" (no space) is valid. This parser requires
+  // "data: " (with space), matching our gateway's output format (sse-starlette).
   const lines = frame.split("\n");
   let eventName = "";
   const dataLines: string[] = [];

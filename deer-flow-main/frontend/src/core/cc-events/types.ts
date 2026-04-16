@@ -17,7 +17,7 @@ export type CCBlock =
   | {
       type: "tool_result";
       tool_use_id: string;
-      content: string | unknown;
+      content: string | Array<{ type: string; [key: string]: unknown }>;
       is_error?: boolean;
     };
 

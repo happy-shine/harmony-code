@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { parseSSEFrame } from "@/core/cc-events/parse";
+import { drainSSE, parseSSEFrame, type ParsedFrame } from "@/core/cc-events/parse";
 
 describe("parseSSEFrame", () => {
   it("parses a data-only frame", () => {
@@ -37,5 +37,37 @@ describe("parseSSEFrame", () => {
       'data: {"type":"system",\ndata: "subtype":"init","session_id":"s1"}';
     const r = parseSSEFrame(frame);
     expect(r.kind).toBe("data");
+  });
+});
+
+describe("drainSSE", () => {
+  it("yields frames from a ReadableStream, handling chunk boundaries", async () => {
+    // Two chunks that split mid-frame
+    const chunk1 = new TextEncoder().encode(
+      'data: {"type":"system","subtype":"init","session_id":"s1"}\n\ndata: {"typ',
+    );
+    const chunk2 = new TextEncoder().encode(
+      'e":"assistant","message":{"id":"m1"}}\n\n',
+    );
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(chunk1);
+        controller.enqueue(chunk2);
+        controller.close();
+      },
+    });
+
+    const frames: ParsedFrame[] = [];
+    for await (const f of drainSSE(stream)) {
+      frames.push(f);
+    }
+
+    expect(frames).toHaveLength(2);
+    expect(frames[0]?.kind).toBe("data");
+    expect(frames[1]?.kind).toBe("data");
+    if (frames[0]?.kind === "data") expect(frames[0].event.type).toBe("system");
+    if (frames[1]?.kind === "data")
+      expect(frames[1].event.type).toBe("assistant");
   });
 });
