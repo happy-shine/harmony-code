@@ -11,12 +11,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from app.audit import emit as audit_emit
+from app.audit_events import result_event, spawn_event
 from app.cc_adapter.adapter import CCAdapter
 from app.cc_adapter.compose import compose_mcp_config, compose_skills_dir
 from app.cc_adapter.types import SpawnConfig
@@ -117,6 +120,26 @@ async def send_message(
             permission_mode="bypassPermissions",
             model=prefs.default_model if prefs else None,
         )
+        # Audit: spawn event. build_cmd is pure — calling it twice (here
+        # for hashing, again inside adapter.run) is safe. We drop the
+        # trailing prompt positional so the hash reflects flags only, per
+        # design Section 5.
+        argv_full = adapter.build_cmd(cfg)
+        argv_without_prompt = argv_full[:-1]
+        mcp_names = [r.name for r in db.query_mcp_for_user(user_id=user_id, enabled_only=True)]
+        skill_names = [r.name for r in db.query_skills_for_user(user_id=user_id, enabled_only=True)]
+        audit_emit(
+            spawn_event(
+                user_id=user_id,
+                thread_id=tid,
+                session_id=row.session_id,
+                model=cfg.model,
+                argv_without_prompt=argv_without_prompt,
+                prompt_len=len(body.content),
+                mcp_servers_enabled=mcp_names,
+                skills_enabled=skill_names,
+            )
+        )
     except BaseException:
         async with _inflight_lock:
             _inflight.discard(tid)
@@ -124,19 +147,41 @@ async def send_message(
 
     async def event_gen() -> AsyncIterator[dict]:
         gen = adapter.run(cfg)
+        start = time.monotonic()
+        disposition: str = "error"  # default until proven otherwise
+        exit_code = 0
+        cost_usd: float | None = None
+        observed_session_id: str | None = row.session_id
         try:
             async for ev in gen:
                 if await request.is_disconnected():
+                    disposition = "disconnected"
+                    exit_code = -1
                     await gen.aclose()
                     break
                 # capture session_id on first init
-                if ev.get("type") == "system" and ev.get("subtype") == "init" and row.session_id is None:
+                if ev.get("type") == "system" and ev.get("subtype") == "init":
                     sid = ev.get("session_id")
                     if sid:
-                        store.set_session_id(tid, sid)
+                        observed_session_id = sid
+                        if row.session_id is None:
+                            store.set_session_id(tid, sid)
+                # capture terminal cost info
+                if ev.get("type") == "result":
+                    cost = ev.get("total_cost_usd")
+                    if cost is None:
+                        cost = ev.get("cost_usd")
+                    if cost is not None:
+                        cost_usd = cost
+                # capture nonzero-exit diagnostic
+                if ev.get("type") == "_adapter" and ev.get("subtype") == "error" and ev.get("code") == "cc_nonzero_exit":
+                    ec = ev.get("exit_code")
+                    if isinstance(ec, int):
+                        exit_code = ec
                 yield {"data": json.dumps(ev, separators=(",", ":"))}
             else:
                 # natural EOF: emit done. (Skipped on break.)
+                disposition = "natural"
                 yield {"event": "done", "data": "{}"}
         finally:
             # Belt-and-suspenders: if we exit via exception or cancellation,
@@ -145,6 +190,27 @@ async def send_message(
                 await gen.aclose()
             except Exception as e:  # pragma: no cover
                 logger.debug("adapter aclose swallowed on cleanup: %r", e)
+            # On the error path (any exception before the for/else fired
+            # AND no disconnect was observed), exit_code stays 0 unless an
+            # adapter.error frame was seen — normalize it to -1 since the
+            # run did not finish cleanly.
+            if disposition == "error":
+                exit_code = -1
+            duration_ms = int((time.monotonic() - start) * 1000)
+            try:
+                audit_emit(
+                    result_event(
+                        user_id=user_id,
+                        thread_id=tid,
+                        session_id=observed_session_id,
+                        duration_ms=duration_ms,
+                        exit_code=exit_code,
+                        cost_usd=cost_usd,
+                        disposition=disposition,  # type: ignore[arg-type]
+                    )
+                )
+            except Exception as e:  # pragma: no cover
+                logger.debug("audit result emit swallowed: %r", e)
             async with _inflight_lock:
                 _inflight.discard(tid)
 

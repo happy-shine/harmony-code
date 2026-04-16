@@ -89,9 +89,7 @@ def test_spawn_event_excludes_prompt_text_from_hash():
         mcp_servers_enabled=[],
         skills_enabled=[],
     )
-    assert ev_a["cmd_args_hash"] == ev_b["cmd_args_hash"], (
-        "hash must be stable across different prompts with identical argv"
-    )
+    assert ev_a["cmd_args_hash"] == ev_b["cmd_args_hash"], "hash must be stable across different prompts with identical argv"
 
     # Now change the argv slightly — hash must differ.
     ev_c = spawn_event(
