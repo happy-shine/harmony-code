@@ -54,6 +54,7 @@ export default function CCChatPage() {
   );
   const [input, setInput] = useState("");
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const creatingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -105,7 +106,14 @@ export default function CCChatPage() {
 
     if (!threadId) {
       // First message on a new thread: create it, then queue the message.
-      await createThread();
+      // Guard against double-send while createThread is in flight.
+      if (creatingRef.current) return;
+      creatingRef.current = true;
+      try {
+        await createThread();
+      } finally {
+        creatingRef.current = false;
+      }
       setPendingMessage(text);
       return;
     }
