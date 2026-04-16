@@ -71,9 +71,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def migrate(*, config_path: str | None = None, dry_run: bool = False) -> int:
     """Run the migration. Returns the number of rows newly inserted."""
-    from packages.harness.deerflow.config.extensions_config import (
-        ExtensionsConfig,
-    )
+    from app.legacy_config import ExtensionsConfig
 
     try:
         cfg = ExtensionsConfig.from_file(config_path)
