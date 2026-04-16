@@ -19,10 +19,11 @@ Endpoints:
   router (Task 3.5). If the unlink fails (file already gone, permission),
   we log and still return ok — the row is the source of truth.
 
-Authorization: M3 stub — ``user_id`` is the ``"u_default"`` returned by
-:func:`app.gateway.deps.current_user_id`. ``user_id`` is forward-compat only;
-today it's recorded on insert but we filter by ``thread_id`` alone (the
-thread itself is the access-control boundary until M5 wires real auth).
+Authorization: per-user (Task 5.3). Every route resolves the caller via
+:func:`app.gateway.deps.current_user_id` and rejects the request with 404
+if the ``cc_thread_session`` row's ``user_id`` doesn't match (see
+:func:`_thread_owned_by`). ``user_id`` is also stored on each ``uploads``
+row so future cross-thread/per-user analytics have the column available.
 """
 
 from __future__ import annotations
