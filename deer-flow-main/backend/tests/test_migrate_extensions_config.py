@@ -289,3 +289,38 @@ def test_dry_run_logs_intent_but_makes_no_db_writes(db, tmp_path, caplog):
     dry_logs = [r for r in caplog.records if "dry" in r.message.lower() or "would" in r.message.lower()]
     names_in_logs = " ".join(r.message for r in dry_logs)
     assert "a" in names_in_logs and "b" in names_in_logs
+
+
+# --- 8. Skills are logged but not inserted --------------------------------
+
+
+def test_skills_are_logged_and_skipped_not_inserted(db, tmp_path, caplog):
+    """Legacy skills carry only name + enabled-state (no path), so the
+    migration logs a warning listing them and does NOT insert skill rows —
+    inserting would create broken symlinks in compose_skills_dir."""
+    from scripts.migrate_extensions_config import main
+
+    path = _write_config(
+        tmp_path,
+        {
+            "mcpServers": {},
+            "skills": {
+                "code_review": {"enabled": True},
+                "summarize": {"enabled": True},
+                "translate": {"enabled": False},
+            },
+        },
+    )
+    with caplog.at_level(logging.WARNING):
+        rc = main(["--config", str(path)])
+
+    assert rc == 0
+    # No skill rows inserted.
+    assert _count_skills(db) == 0
+
+    # A warning line must list all three skill names.
+    warn_msgs = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    joined = " ".join(warn_msgs)
+    assert "code_review" in joined
+    assert "summarize" in joined
+    assert "translate" in joined

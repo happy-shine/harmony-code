@@ -86,6 +86,21 @@ def migrate(*, config_path: str | None = None, dry_run: bool = False) -> int:
         skills_count,
     )
 
+    # Skills: log and skip. The legacy file only tracks enabled-state by
+    # name, not paths — the skill *files* lived in a separate deerflow tree
+    # that M3 does not import. Inserting rows without valid paths would
+    # produce broken symlinks in compose_skills_dir on the next spawn.
+    # Users re-upload via POST /api/skills after migration.
+    if cfg.skills:
+        names = sorted(cfg.skills.keys())
+        logger.warning(
+            "skipping %d skill(s) from legacy config (%s); legacy config "
+            "tracks only enabled-state, not skill files. Re-upload via "
+            "POST /api/skills after migration.",
+            len(names),
+            ", ".join(names),
+        )
+
     if mcp_count == 0:
         return 0
 
