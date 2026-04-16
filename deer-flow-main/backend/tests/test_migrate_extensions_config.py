@@ -324,3 +324,32 @@ def test_skills_are_logged_and_skipped_not_inserted(db, tmp_path, caplog):
     assert "code_review" in joined
     assert "summarize" in joined
     assert "translate" in joined
+
+
+# --- 9. Custom --config path overrides resolution -------------------------
+
+
+def test_custom_config_path_overrides_default_resolution(db, tmp_path):
+    """``--config /arbitrary/path.json`` loads that file regardless of
+    whether the default resolver would have found something else."""
+    from scripts.migrate_extensions_config import main
+
+    # A non-standard filename that resolve_config_path would never look at.
+    custom = tmp_path / "my_legacy_stash.json"
+    custom.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "custom": {"type": "stdio", "command": "run-custom"}
+                },
+                "skills": {},
+            }
+        )
+    )
+
+    rc = main(["--config", str(custom)])
+    assert rc == 0
+
+    rows = db.list_mcp_for_user(user_id="u_default")
+    assert [r.name for r in rows] == ["custom"]
+    assert rows[0].command == "run-custom"
