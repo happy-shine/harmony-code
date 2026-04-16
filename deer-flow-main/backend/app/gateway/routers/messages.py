@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from collections.abc import AsyncIterator
 
@@ -47,8 +48,38 @@ class SendMessageBody(BaseModel):
     attachments: list[str] = []
 
 
+# Admission-control limits per design Section 2 concurrency table.
+# Overridable via env vars for ops: ``HARMONY_MAX_PER_USER`` /
+# ``HARMONY_MAX_SERVER``. Per-thread is always 1 — the design table pins
+# it to 1, and ``--resume`` semantics assume strict serialization per
+# thread. Tests monkeypatch the module attrs directly (the module-level
+# constants are bound at import time, so env-var reloads mid-test do not
+# take effect without that).
+_MAX_PER_USER = int(os.environ.get("HARMONY_MAX_PER_USER", "3"))
+_MAX_SERVER = int(os.environ.get("HARMONY_MAX_SERVER", "20"))
+
+# Counters are guarded by ``_inflight_lock``. The server total is wrapped
+# in a one-element list to avoid ``global`` + reassignment ceremony at
+# every mutation site.
 _inflight: set[str] = set()
+_user_inflight: dict[str, int] = {}
+_server_inflight: list[int] = [0]
 _inflight_lock = asyncio.Lock()
+
+
+async def _release_admission(tid: str, user_id: str) -> None:
+    """Release per-thread + per-user + server-wide slots.
+
+    Idempotent — safe to call twice (e.g. once in ``event_gen.finally``
+    and again in a defensive outer except). All counters clamp at 0.
+    """
+    async with _inflight_lock:
+        _inflight.discard(tid)
+        if user_id in _user_inflight:
+            _user_inflight[user_id] -= 1
+            if _user_inflight[user_id] <= 0:
+                del _user_inflight[user_id]
+        _server_inflight[0] = max(0, _server_inflight[0] - 1)
 
 
 @router.post("/threads")
@@ -80,10 +111,20 @@ async def send_message(
     if row is None or row.user_id != user_id:
         raise HTTPException(404, "thread_not_found")
 
+    # Admission control per design Section 2 concurrency table:
+    # server capacity (503) > per-user concurrency (429) > per-thread
+    # serialize (409). Evaluated in that order under the lock so we
+    # never admit past a higher-scope limit.
     async with _inflight_lock:
+        if _server_inflight[0] >= _MAX_SERVER:
+            raise HTTPException(503, "server_busy")
+        if _user_inflight.get(user_id, 0) >= _MAX_PER_USER:
+            raise HTTPException(429, "user_concurrency_limit")
         if tid in _inflight:
             raise HTTPException(409, "thread_busy")
         _inflight.add(tid)
+        _user_inflight[user_id] = _user_inflight.get(user_id, 0) + 1
+        _server_inflight[0] += 1
 
     # Compose per-spawn MCP config + skills dir from the user's DB rows.
     # Rebuilt on every request so CRUD edits take effect on the next spawn
@@ -111,6 +152,10 @@ async def send_message(
         # the adapter nor CC gets a model flag — CC picks its own default.
         prefs = db.get_user_prefs(user_id)
         adapter = CCAdapter()
+        # Optional wall-clock budget per request, driven by env. Unset →
+        # no cap (MVP default — legitimate long runs survive). Tests
+        # monkeypatch this env var to force the timeout path.
+        timeout_env = os.environ.get("HARMONY_CC_TIMEOUT_SECONDS")
         cfg = SpawnConfig(
             cwd=row.cwd,
             user_prompt=body.content,
@@ -119,6 +164,7 @@ async def send_message(
             add_dirs=[str(thread_root / "uploads")],
             permission_mode="bypassPermissions",
             model=prefs.default_model if prefs else None,
+            timeout_seconds=float(timeout_env) if timeout_env else None,
         )
         # Audit: spawn event. build_cmd is pure — calling it twice (here
         # for hashing, again inside adapter.run) is safe. We drop the
@@ -147,8 +193,7 @@ async def send_message(
             )
         )
     except BaseException:
-        async with _inflight_lock:
-            _inflight.discard(tid)
+        await _release_admission(tid, user_id)
         raise
 
     async def event_gen() -> AsyncIterator[dict]:
@@ -217,8 +262,7 @@ async def send_message(
                 )
             except Exception as e:  # pragma: no cover
                 logger.debug("audit result emit swallowed: %r", e)
-            async with _inflight_lock:
-                _inflight.discard(tid)
+            await _release_admission(tid, user_id)
 
     return EventSourceResponse(event_gen())
 
