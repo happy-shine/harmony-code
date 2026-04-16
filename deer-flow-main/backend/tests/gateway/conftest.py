@@ -22,12 +22,18 @@ def _run_harmony_migrations(data_dir: Path) -> None:
     alembic/env.py resolves the DB url from ``$HARMONY_DATA_DIR`` and
     overrides whatever we pass on Config, so we have to point that env var
     at ``data_dir`` for the duration of the migration.
+
+    We deliberately construct :class:`Config` **without** passing
+    ``alembic.ini`` — the ini file's ``[loggers]`` section would cause
+    alembic's ``env.py`` to call ``logging.config.fileConfig``, which by
+    default disables all pre-existing loggers and breaks unrelated
+    ``caplog``-based tests downstream.
     """
     backend_root = Path(__file__).resolve().parents[2]
     prev = os.environ.get("HARMONY_DATA_DIR")
     os.environ["HARMONY_DATA_DIR"] = str(data_dir)
     try:
-        cfg = Config(str(backend_root / "alembic.ini"))
+        cfg = Config()
         cfg.set_main_option("script_location", str(backend_root / "alembic"))
         command.upgrade(cfg, "head")
     finally:

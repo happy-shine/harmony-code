@@ -20,10 +20,16 @@ def test_create_thread_then_send_message_streams_sse(tmp_path, monkeypatch):
     # Task 3.3: send_message now reads harmony.db for MCP + skills on every
     # spawn. Apply migrations against the tmp data dir so those queries find
     # the expected schema.
+    #
+    # Construct :class:`Config` without ``alembic.ini`` — the ini file's
+    # ``[loggers]`` section would cause alembic's ``env.py`` to call
+    # ``logging.config.fileConfig``, which by default disables all
+    # pre-existing loggers and breaks unrelated ``caplog``-based tests
+    # downstream. env.py also reads ``$HARMONY_DATA_DIR`` and overrides any
+    # ``sqlalchemy.url`` we pass here, so don't bother setting it.
     backend_root = Path(__file__).resolve().parents[2]
-    cfg = Config(str(backend_root / "alembic.ini"))
+    cfg = Config()
     cfg.set_main_option("script_location", str(backend_root / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{tmp_path}/harmony.db")
     command.upgrade(cfg, "head")
 
     r = client.post("/api/threads", json={})

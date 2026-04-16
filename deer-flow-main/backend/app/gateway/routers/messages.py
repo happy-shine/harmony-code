@@ -97,28 +97,39 @@ async def send_message(tid: str, body: SendMessageBody, request: Request):
     # without any caching layer. row.cwd is authoritative for workspace
     # location (set at create_thread time); we only derive the thread root
     # from data_dir for uploads/.claude placement.
-    user_id = _current_user_id()
-    data_dir = _data_dir()
-    tmp_root = data_dir / "tmp"
-    tmp_root.mkdir(parents=True, exist_ok=True)
-    thread_root = data_dir / "threads" / tid / "user-data"
-    db = _db()
-    mcp_path = compose_mcp_config(
-        db=db, user_id=user_id, thread_id=tid, tmp_root=tmp_root
-    )
-    compose_skills_dir(
-        db=db, user_id=user_id, skills_dir=thread_root / ".claude" / "skills"
-    )
+    #
+    # Compose can raise (e.g. a malformed stdio MCP row with no command
+    # raises ValueError). If anything between here and the ``return
+    # EventSourceResponse(...)`` below fails, ``event_gen``'s ``finally``
+    # never fires — so we must release ``_inflight`` ourselves, otherwise
+    # the thread is wedged at 409 until server restart.
+    try:
+        user_id = _current_user_id()
+        data_dir = _data_dir()
+        tmp_root = data_dir / "tmp"
+        tmp_root.mkdir(parents=True, exist_ok=True)
+        thread_root = data_dir / "threads" / tid / "user-data"
+        db = _db()
+        mcp_path = compose_mcp_config(
+            db=db, user_id=user_id, thread_id=tid, tmp_root=tmp_root
+        )
+        compose_skills_dir(
+            db=db, user_id=user_id, skills_dir=thread_root / ".claude" / "skills"
+        )
 
-    adapter = CCAdapter()
-    cfg = SpawnConfig(
-        cwd=row.cwd,
-        user_prompt=body.content,
-        resume_session_id=row.session_id,
-        mcp_config_path=str(mcp_path),
-        add_dirs=[str(thread_root / "uploads")],
-        permission_mode="bypassPermissions",
-    )
+        adapter = CCAdapter()
+        cfg = SpawnConfig(
+            cwd=row.cwd,
+            user_prompt=body.content,
+            resume_session_id=row.session_id,
+            mcp_config_path=str(mcp_path),
+            add_dirs=[str(thread_root / "uploads")],
+            permission_mode="bypassPermissions",
+        )
+    except BaseException:
+        async with _inflight_lock:
+            _inflight.discard(tid)
+        raise
 
     async def event_gen() -> AsyncIterator[dict]:
         gen = adapter.run(cfg)

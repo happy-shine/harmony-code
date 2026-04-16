@@ -25,12 +25,18 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 def _run_migrations(data_dir: Path) -> None:
     # alembic/env.py reads HARMONY_DATA_DIR at import time and clobbers any
     # sqlalchemy.url we pass on Config — so we route the env var instead.
+    #
+    # We deliberately construct :class:`Config` **without** passing
+    # ``alembic.ini`` — the ini file's ``[loggers]`` section would cause
+    # alembic's ``env.py`` to call ``logging.config.fileConfig``, which by
+    # default disables all pre-existing loggers and breaks unrelated
+    # ``caplog``-based tests downstream.
     import os
 
     prev = os.environ.get("HARMONY_DATA_DIR")
     os.environ["HARMONY_DATA_DIR"] = str(data_dir)
     try:
-        cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+        cfg = Config()
         cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
         command.upgrade(cfg, "head")
     finally:
@@ -148,6 +154,33 @@ def test_send_message_composes_mcp_and_skills(migrated_data_dir, monkeypatch):
 
     # --- uploads added to cfg.add_dirs so CC can read attachments ---
     assert str(thread_root / "uploads") in cfg.add_dirs
+
+
+def test_inflight_released_when_compose_fails(migrated_data_dir, monkeypatch):
+    """If compose raises before ``event_gen`` starts, ``_inflight`` must not leak.
+
+    ``event_gen``'s ``finally`` only runs once the async generator is iterated,
+    so a failure between the inflight-add and the ``EventSourceResponse`` return
+    would otherwise wedge the thread at 409 until server restart.
+    """
+    # Seed a malformed stdio MCP row (no command) so compose_mcp_config raises ValueError.
+    db = Db(get_engine(migrated_data_dir))
+    db.insert_mcp(user_id="u_default", name="broken", transport="stdio")
+
+    from app.gateway.harmony_app import app
+    from app.gateway.routers import messages
+
+    # raise_server_exceptions=False so the ValueError surfaces as a 500 instead
+    # of bubbling out of client.post (which would mask the post-condition check).
+    client = TestClient(app, raise_server_exceptions=False)
+
+    tid = client.post("/api/threads", json={}).json()["id"]
+
+    r1 = client.post(f"/api/threads/{tid}/messages", json={"content": "hi"})
+    assert r1.status_code == 500  # FastAPI default when handler raises non-HTTPException
+
+    # _inflight should be empty — second attempt must NOT 409 with 'thread_busy'
+    assert tid not in messages._inflight, "inflight leaked after compose failure"
 
 
 def test_send_message_skips_disabled_rows(migrated_data_dir, monkeypatch):
