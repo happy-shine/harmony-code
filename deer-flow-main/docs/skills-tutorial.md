@@ -4,8 +4,10 @@ A harmony-code skill is a `SKILL.md` plus any supporting files that Claude
 Code (CC) picks up when it runs. On every CC spawn the gateway wipes the
 thread's `.claude/skills/` directory and re-symlinks the caller's enabled
 skills from `$HARMONY_DATA_DIR/skills_store/<id>/` — edits through the
-API take effect on the next message with no server restart. The on-disk
-format is the same one Anthropic documents at
+API take effect on the next message with no server restart; in-flight
+streams keep the skill set they were spawned with, and the change is
+picked up on the following spawn. The on-disk format is the same one
+Anthropic documents at
 <https://code.claude.com/docs/en/skills>; harmony-code just owns the
 install pipeline and the per-thread composition.
 
@@ -34,10 +36,10 @@ When asked to summarize a repository, do the following:
 Do not run tests or network calls. Do not modify files.
 ```
 
-That is a complete skill. `name` must match the directory name CC sees
-under `.claude/skills/` (harmony-code sets that from the front-matter
-`name:` field — see `backend/app/skills/installer.py::parse_skill_name`;
-falls back to the directory name if the front-matter is missing).
+That is a complete skill. `name` is the directory name CC sees under
+`.claude/skills/`. harmony-code takes it from the front-matter `name:`
+field; if the field is missing it falls back to the `skill_id`
+directory name.
 
 ## Authenticate
 
@@ -70,8 +72,9 @@ repo-report/
 Zip it. The installer accepts two layouts — zip the directory contents
 so `SKILL.md` is at the zip root, or zip the wrapping directory
 (GitHub-archive convention, the one-top-level-dir is stripped). Anything
-else — multiple top-level entries, `SKILL.md` nested two levels deep —
-fails validation.
+else — e.g. `SKILL.md` nested two levels deep — fails validation.
+Multi-root archives are accepted only if `SKILL.md` sits at the root
+alongside the other entries.
 
 ```bash
 # Option 1: zip contents (SKILL.md at zip root)
@@ -193,7 +196,7 @@ ops-managed, not user-managed.
 
 | Symptom | Likely cause |
 | --- | --- |
-| `400 Skill at ... is missing SKILL.md at the top level` | Zip layout is wrong. Either zip the directory contents or zip exactly one wrapping directory. Multiple top-level entries are not stripped. |
+| `400 Skill at ... is missing SKILL.md at the top level` | Zip layout is wrong. Either zip the directory contents (with `SKILL.md` at the zip root) or zip exactly one wrapping directory. With multiple top-level entries the wrapping is not stripped, so `SKILL.md` must sit at the archive root alongside them. |
 | `400 file must be a .zip` | The upload filename does not end in `.zip`. The check is on the filename, not content sniffing. |
 | `400 Zip entry '...' has unsafe path` or `... escapes destination` or `... is a symlink; not supported` | The archive contains an absolute path, `..` traversal, or a symlink entry. Rebuild the zip without those. |
 | `400 git clone failed (exit N): ...` | The clone subprocess errored. Check URL, network, and auth. Credentials in the URL, if any, are redacted in the response body but logged in full at DEBUG on the server. |
