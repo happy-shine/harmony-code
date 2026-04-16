@@ -180,10 +180,7 @@ def test_null_owner_legacy_row_is_404_for_everyone(client):
 
     conn = sqlite3.connect(store.db_path)
     try:
-        conn.execute(
-            "INSERT INTO cc_thread_session(thread_id, session_id, cwd, user_id) "
-            "VALUES ('t_legacy', NULL, '/tmp/legacy', NULL)"
-        )
+        conn.execute("INSERT INTO cc_thread_session(thread_id, session_id, cwd, user_id) VALUES ('t_legacy', NULL, '/tmp/legacy', NULL)")
         conn.commit()
     finally:
         conn.close()

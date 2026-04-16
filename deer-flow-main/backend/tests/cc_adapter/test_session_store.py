@@ -52,14 +52,8 @@ def test_ensure_schema_idempotent_adds_user_id_column(tmp_path):
     # Seed a legacy DB exactly as the pre-5.3 code would have.
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute(
-            "CREATE TABLE cc_thread_session ("
-            "thread_id TEXT PRIMARY KEY, session_id TEXT, cwd TEXT NOT NULL)"
-        )
-        conn.execute(
-            "INSERT INTO cc_thread_session(thread_id, session_id, cwd) "
-            "VALUES ('t_legacy', NULL, '/tmp/legacy')"
-        )
+        conn.execute("CREATE TABLE cc_thread_session (thread_id TEXT PRIMARY KEY, session_id TEXT, cwd TEXT NOT NULL)")
+        conn.execute("INSERT INTO cc_thread_session(thread_id, session_id, cwd) VALUES ('t_legacy', NULL, '/tmp/legacy')")
         conn.commit()
     finally:
         conn.close()
@@ -95,10 +89,7 @@ def test_list_for_user_returns_only_owned(tmp_path):
     # Seed a NULL-owner legacy row to confirm it's excluded.
     conn = sqlite3.connect(str(tmp_path / "sessions.db"))
     try:
-        conn.execute(
-            "INSERT INTO cc_thread_session(thread_id, session_id, cwd, user_id) "
-            "VALUES ('tLegacy', NULL, '/tmp/legacy', NULL)"
-        )
+        conn.execute("INSERT INTO cc_thread_session(thread_id, session_id, cwd, user_id) VALUES ('tLegacy', NULL, '/tmp/legacy', NULL)")
         conn.commit()
     finally:
         conn.close()

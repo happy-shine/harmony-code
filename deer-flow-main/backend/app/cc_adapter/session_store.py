@@ -65,18 +65,12 @@ class SessionStore:
                 )
             """)
             # Migrate pre-5.3 DBs that have the table but no user_id column.
-            cols = {
-                row[1]
-                for row in conn.execute("PRAGMA table_info(cc_thread_session)").fetchall()
-            }
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(cc_thread_session)").fetchall()}
             if "user_id" not in cols:
                 conn.execute("ALTER TABLE cc_thread_session ADD COLUMN user_id TEXT")
             # Index for per-user listings. CREATE INDEX IF NOT EXISTS is
             # idempotent and cheap; sqlite uses it for list_for_user.
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS ix_cc_thread_session_user "
-                "ON cc_thread_session(user_id)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS ix_cc_thread_session_user ON cc_thread_session(user_id)")
 
     def create(self, thread_id: str, cwd: str, *, user_id: str) -> None:
         """Insert a new thread row. ``user_id`` is required (keyword-only).
@@ -92,8 +86,7 @@ class SessionStore:
     def get(self, thread_id: str) -> Mapping | None:
         with closing(self._conn()) as conn, conn:
             row = conn.execute(
-                "SELECT thread_id, session_id, cwd, user_id "
-                "FROM cc_thread_session WHERE thread_id=?",
+                "SELECT thread_id, session_id, cwd, user_id FROM cc_thread_session WHERE thread_id=?",
                 (thread_id,),
             ).fetchone()
         return Mapping(*row) if row else None
@@ -108,8 +101,7 @@ class SessionStore:
         """
         with closing(self._conn()) as conn, conn:
             rows = conn.execute(
-                "SELECT thread_id, session_id, cwd, user_id "
-                "FROM cc_thread_session WHERE user_id = ?",
+                "SELECT thread_id, session_id, cwd, user_id FROM cc_thread_session WHERE user_id = ?",
                 (user_id,),
             ).fetchall()
         return [Mapping(*r) for r in rows]

@@ -161,9 +161,7 @@ def get_tree(tid: str, user_id: str = Depends(current_user_id)) -> dict:
 
 
 @router.get("/files/{path:path}")
-def get_file(
-    tid: str, path: str, user_id: str = Depends(current_user_id)
-) -> FileResponse:
+def get_file(tid: str, path: str, user_id: str = Depends(current_user_id)) -> FileResponse:
     """Stream a file under ``row.cwd``. Path-escape rejected with 400."""
     cwd = _thread_root(tid, user_id)
     full = _safe_resolve(cwd, path)
