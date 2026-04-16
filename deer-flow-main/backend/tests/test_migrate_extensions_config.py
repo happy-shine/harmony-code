@@ -150,3 +150,45 @@ def test_stdio_server_inserts_global_row_with_json_fields(db, tmp_path):
     # Unused stdio fields stay NULL.
     assert row.url is None
     assert row.headers_json is None
+
+
+# --- 4. Populated file, http server with headers --------------------------
+
+
+def test_http_server_with_headers_inserts_url_and_headers_json(db, tmp_path):
+    """An http server imports with transport='http', url, and headers_json set."""
+    from scripts.migrate_extensions_config import main
+
+    path = _write_config(
+        tmp_path,
+        {
+            "mcpServers": {
+                "remote": {
+                    "enabled": False,  # disabled preserved
+                    "type": "http",
+                    "url": "https://mcp.example.com/v1",
+                    "headers": {
+                        "Authorization": "Bearer abc123",
+                        "X-Client": "harmony",
+                    },
+                }
+            },
+            "skills": {},
+        },
+    )
+    rc = main(["--config", str(path)])
+
+    assert rc == 0
+    rows = db.list_mcp_for_user(user_id="u_default")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.name == "remote"
+    assert row.transport == "http"
+    assert row.url == "https://mcp.example.com/v1"
+    assert row.enabled is False  # preserved from legacy config
+    assert json.loads(row.headers_json) == {
+        "Authorization": "Bearer abc123",
+        "X-Client": "harmony",
+    }
+    assert row.command is None
+    assert row.args_json is None
