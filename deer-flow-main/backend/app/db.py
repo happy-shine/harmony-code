@@ -17,7 +17,7 @@ import os
 import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
@@ -558,7 +558,7 @@ class Db:
         infeasible, so we do not hash it at rest.
         """
         token = secrets.token_hex(16)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         expires = now + timedelta(seconds=ttl_seconds)
         with self.engine.begin() as conn:
             conn.execute(
@@ -615,8 +615,8 @@ class Db:
         else:
             expires_dt = expires_raw
         if expires_dt.tzinfo is not None:
-            expires_dt = expires_dt.astimezone(timezone.utc).replace(tzinfo=None)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+            expires_dt = expires_dt.astimezone(UTC).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         if expires_dt <= now:
             return None
         return AuthSessionRow(**dict(row))
@@ -625,9 +625,9 @@ class Db:
         """Update ``last_seen_at``. ``now`` is parameterized for tests
         that need to force a later timestamp without sleeping."""
         if now is None:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
         if now.tzinfo is not None:
-            now = now.astimezone(timezone.utc).replace(tzinfo=None)
+            now = now.astimezone(UTC).replace(tzinfo=None)
         with self.engine.begin() as conn:
             conn.execute(
                 text("UPDATE auth_sessions SET last_seen_at = :now WHERE id = :id"),
@@ -640,7 +640,7 @@ class Db:
 
     def sweep_expired_sessions(self) -> int:
         """Delete all expired session rows. Returns the number removed."""
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         with self.engine.begin() as conn:
             result = conn.execute(
                 text("DELETE FROM auth_sessions WHERE expires_at <= :now"),

@@ -8,7 +8,7 @@ semantics.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -148,7 +148,7 @@ def test_touch_auth_session_updates_last_seen(db):
     created = db.create_auth_session(user_id=uid, ttl_seconds=3600, user_agent=None, ip=None)
     original_last_seen = created.last_seen_at
     # Force the touched value to be >= original by passing an explicit now
-    later = datetime.now(timezone.utc) + timedelta(seconds=60)
+    later = datetime.now(UTC) + timedelta(seconds=60)
     db.touch_auth_session(created.id, now=later)
     row = db.get_auth_session(created.id)
     assert row is not None
@@ -164,9 +164,9 @@ def test_touch_auth_session_updates_last_seen(db):
         orig_dt = original_last_seen
     # Normalize tzinfo
     if touched_dt.tzinfo is None:
-        touched_dt = touched_dt.replace(tzinfo=timezone.utc)
+        touched_dt = touched_dt.replace(tzinfo=UTC)
     if orig_dt.tzinfo is None:
-        orig_dt = orig_dt.replace(tzinfo=timezone.utc)
+        orig_dt = orig_dt.replace(tzinfo=UTC)
     assert touched_dt >= orig_dt
 
 

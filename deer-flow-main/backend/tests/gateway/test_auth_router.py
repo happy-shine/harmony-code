@@ -8,7 +8,7 @@ expiry handling, and the downstream effect of the now-strict
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -203,7 +203,7 @@ def test_protected_endpoint_with_session_pointing_at_deleted_user_returns_401(ct
     import sqlalchemy
 
     with db.engine.begin() as conn:
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         conn.execute(
             sqlalchemy.text(
                 "INSERT INTO auth_sessions (id, user_id, created_at, expires_at, last_seen_at) "
@@ -222,7 +222,7 @@ def test_protected_endpoint_with_session_pointing_at_deleted_user_returns_401(ct
 def test_user_a_cannot_see_user_b_mcp_rows(ctx):
     c, db, _ = ctx
     # Seed two users.
-    uid_a = db.insert_user(email="a@example.com", password_hash=hash_password("pw"))
+    db.insert_user(email="a@example.com", password_hash=hash_password("pw"))
     uid_b = db.insert_user(email="b@example.com", password_hash=hash_password("pw"))
     # Directly insert an MCP row owned by B.
     b_mcp = db.insert_mcp(user_id=uid_b, name="b_only", transport="stdio", command="true")

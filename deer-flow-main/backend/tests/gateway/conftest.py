@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import UTC
 from pathlib import Path
 
 import httpx
@@ -138,7 +139,7 @@ def _seed_real_server_user(data_dir: Path) -> str:
     SQLAlchemy against the subprocess's harmony.db. Returns the session
     token for the caller to stick in a ``harmony_session`` cookie."""
     import secrets as _secrets
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     import sqlalchemy as _sa
 
@@ -146,7 +147,7 @@ def _seed_real_server_user(data_dir: Path) -> str:
     from app.db import get_engine
 
     engine = get_engine(data_dir)
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     token = _secrets.token_hex(16)
     with engine.begin() as conn:
         # User row (ignore if already there — shouldn't happen in a fresh
