@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { FolderIcon } from "lucide-react";
 import { useParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { useThreadStream } from "@/core/threads/cc-hooks";
-import type { UIMessage, UIBlock } from "@/core/messages/cc-reducer";
 import {
   TextBlock,
   ThinkingBlock,
@@ -12,6 +11,9 @@ import {
   SystemInitBanner,
   ResultFooter,
 } from "@/components/workspace/cc-blocks";
+import { FileBrowser } from "@/components/workspace/file-browser";
+import type { UIMessage, UIBlock } from "@/core/messages/cc-reducer";
+import { useThreadStream } from "@/core/threads/cc-hooks";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,6 +56,7 @@ export default function CCChatPage() {
   );
   const [input, setInput] = useState("");
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [showFiles, setShowFiles] = useState(false);
   const creatingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -134,7 +137,28 @@ export default function CCChatPage() {
 
   // --- Render -------------------------------------------------------------
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full">
+      <div className="flex h-full min-w-0 flex-1 flex-col">
+      {/* Header with file-browser toggle (only when a thread exists) */}
+      {threadId && (
+        <div className="flex items-center justify-end border-b border-neutral-200 px-4 py-1 dark:border-neutral-800">
+          <button
+            type="button"
+            onClick={() => setShowFiles((v) => !v)}
+            aria-pressed={showFiles}
+            className={
+              "flex items-center gap-1 rounded px-2 py-1 text-xs " +
+              (showFiles
+                ? "bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-100"
+                : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800")
+            }
+          >
+            <FolderIcon size={14} />
+            Files
+          </button>
+        </div>
+      )}
+
       {/* Messages area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pt-4">
         <div className="mx-auto max-w-3xl space-y-2 pb-4">
@@ -249,6 +273,13 @@ export default function CCChatPage() {
           )}
         </div>
       </div>
+      </div>
+
+      {showFiles && threadId && (
+        <aside className="hidden h-full w-[520px] shrink-0 md:flex">
+          <FileBrowser threadId={threadId} className="h-full w-full" />
+        </aside>
+      )}
     </div>
   );
 }
