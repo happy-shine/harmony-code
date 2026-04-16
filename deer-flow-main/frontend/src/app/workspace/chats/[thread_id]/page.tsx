@@ -1,189 +1,246 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams } from "next/navigation";
 
-import { type PromptInputMessage } from "@/components/ai-elements/prompt-input";
-import { ArtifactTrigger } from "@/components/workspace/artifacts";
+import { useThreadStream } from "@/core/threads/cc-hooks";
+import type { UIMessage, UIBlock } from "@/core/messages/cc-reducer";
 import {
-  ChatBox,
-  useSpecificChatMode,
-  useThreadChat,
-} from "@/components/workspace/chats";
-import { ExportTrigger } from "@/components/workspace/export-trigger";
-import { InputBox } from "@/components/workspace/input-box";
-import {
-  MessageList,
-  MESSAGE_LIST_DEFAULT_PADDING_BOTTOM,
-  MESSAGE_LIST_FOLLOWUPS_EXTRA_PADDING_BOTTOM,
-} from "@/components/workspace/messages";
-import { ThreadContext } from "@/components/workspace/messages/context";
-import { ThreadTitle } from "@/components/workspace/thread-title";
-import { TodoList } from "@/components/workspace/todo-list";
-import { TokenUsageIndicator } from "@/components/workspace/token-usage-indicator";
-import { Welcome } from "@/components/workspace/welcome";
-import { useI18n } from "@/core/i18n/hooks";
-import { useNotification } from "@/core/notification/hooks";
-import { useThreadSettings } from "@/core/settings";
-import { useThreadStream } from "@/core/threads/hooks";
-import { textOfMessage } from "@/core/threads/utils";
-import { env } from "@/env";
-import { cn } from "@/lib/utils";
+  TextBlock,
+  ThinkingBlock,
+  ToolUseBlock,
+  SystemInitBanner,
+  ResultFooter,
+} from "@/components/workspace/cc-blocks";
 
-export default function ChatPage() {
-  const { t } = useI18n();
-  const [showFollowups, setShowFollowups] = useState(false);
-  const { threadId, setThreadId, isNewThread, setIsNewThread, isMock } =
-    useThreadChat();
-  const [settings, setSettings] = useThreadSettings(threadId);
-  const [mounted, setMounted] = useState(false);
-  useSpecificChatMode();
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
+function AssistantMessage({ msg }: { msg: Extract<UIMessage, { kind: "assistant" }> }) {
+  return (
+    <div className="space-y-1">
+      {msg.blocks.map((b: UIBlock, bi: number) => {
+        if (b.kind === "text") return <TextBlock key={bi} text={b.text} streaming={b.streaming} />;
+        if (b.kind === "thinking")
+          return <ThinkingBlock key={bi} text={b.text} streaming={b.streaming} />;
+        if (b.kind === "tool_use") return <ToolUseBlock key={b.id} block={b} />;
+        return null;
+      })}
+    </div>
+  );
+}
+
+function UserBubble({ text }: { text: string }) {
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[80%] rounded-lg bg-blue-600 px-3 py-2 text-sm text-white">
+        {text}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+export default function CCChatPage() {
+  const { thread_id: threadIdFromPath } = useParams<{ thread_id: string }>();
+  const isNew = threadIdFromPath === "new";
+
+  const [threadId, setThreadId] = useState<string | null>(
+    isNew ? null : threadIdFromPath,
+  );
+  const [input, setInput] = useState("");
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Hook uses the current threadId. When threadId is null (new thread) we
+  // pass an empty string; the hook's `send` won't be called until threadId
+  // is set (see pendingMessage pattern below).
+  const stream = useThreadStream(threadId ?? "");
+
+  // Auto-scroll to bottom when messages change
   useEffect(() => {
-    setMounted(true);
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [stream.messages, stream.status]);
+
+  // --- New-thread creation ------------------------------------------------
+  const createThread = useCallback(async (): Promise<string> => {
+    const r = await fetch("/api/threads", { method: "POST" });
+    if (!r.ok) throw new Error(`Create thread failed: ${r.status}`);
+    const data = (await r.json()) as { id: string };
+    setThreadId(data.id);
+    // Update URL without triggering a Next.js navigation (avoids remount)
+    history.replaceState(null, "", `/workspace/chats/${data.id}`);
+    return data.id;
   }, []);
 
-  const { showNotification } = useNotification();
+  // When threadId becomes available and there is a pending message, fire
+  // `send`. This avoids the stale-closure problem: after `setThreadId` the
+  // component re-renders, `useThreadStream` receives the new threadId, a
+  // fresh `send` is created, and *then* this effect dispatches the message.
+  useEffect(() => {
+    if (threadId && pendingMessage) {
+      const msg = pendingMessage;
+      setPendingMessage(null);
+      void stream.send(msg);
+    }
+    // `stream` is intentionally omitted — we only want to fire when
+    // threadId/pendingMessage change, and the latest `stream.send` is
+    // already captured because React re-creates it when threadId changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId, pendingMessage]);
 
-  const [thread, sendMessage, isUploading] = useThreadStream({
-    threadId: isNewThread ? undefined : threadId,
-    context: settings.context,
-    isMock,
-    onStart: (createdThreadId) => {
-      setThreadId(createdThreadId);
-      setIsNewThread(false);
-      // ! Important: Never use next.js router for navigation in this case, otherwise it will cause the thread to re-mount and lose all states. Use native history API instead.
-      history.replaceState(null, "", `/workspace/chats/${createdThreadId}`);
-    },
-    onFinish: (state) => {
-      if (document.hidden || !document.hasFocus()) {
-        let body = "Conversation finished";
-        const lastMessage = state.messages.at(-1);
-        if (lastMessage) {
-          const textContent = textOfMessage(lastMessage);
-          if (textContent) {
-            body =
-              textContent.length > 200
-                ? textContent.substring(0, 200) + "..."
-                : textContent;
-          }
-        }
-        showNotification(state.title, { body });
+  // --- Send handler -------------------------------------------------------
+  const handleSend = useCallback(async () => {
+    const text = input.trim();
+    if (!text) return;
+    setInput("");
+
+    if (!threadId) {
+      // First message on a new thread: create it, then queue the message.
+      await createThread();
+      setPendingMessage(text);
+      return;
+    }
+
+    await stream.send(text);
+    inputRef.current?.focus();
+  }, [input, threadId, createThread, stream]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        void handleSend();
       }
     },
-  });
-
-  const handleSubmit = useCallback(
-    (message: PromptInputMessage) => {
-      void sendMessage(threadId, message);
-    },
-    [sendMessage, threadId],
+    [handleSend],
   );
-  const handleStop = useCallback(async () => {
-    await thread.stop();
-  }, [thread]);
 
-  const messageListPaddingBottom = showFollowups
-    ? MESSAGE_LIST_DEFAULT_PADDING_BOTTOM +
-      MESSAGE_LIST_FOLLOWUPS_EXTRA_PADDING_BOTTOM
-    : undefined;
-
+  // --- Render -------------------------------------------------------------
   return (
-    <ThreadContext.Provider value={{ thread, isMock }}>
-      <ChatBox threadId={threadId}>
-        <div className="relative flex size-full min-h-0 justify-between">
-          <header
-            className={cn(
-              "absolute top-0 right-0 left-0 z-30 flex h-12 shrink-0 items-center px-4",
-              isNewThread
-                ? "bg-background/0 backdrop-blur-none"
-                : "bg-background/80 shadow-xs backdrop-blur",
-            )}
-          >
-            <div className="flex w-full items-center text-sm font-medium">
-              <ThreadTitle threadId={threadId} thread={thread} />
+    <div className="flex h-full flex-col">
+      {/* Messages area */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pt-4">
+        <div className="mx-auto max-w-3xl space-y-2 pb-4">
+          {stream.messages.map((m: UIMessage, i: number) => {
+            if (m.kind === "system_init") {
+              return (
+                <SystemInitBanner
+                  key={`init-${i}`}
+                  sessionId={m.sessionId}
+                  model={m.model}
+                  cwd={m.cwd}
+                  tools={m.tools}
+                  mcpServers={m.mcpServers}
+                />
+              );
+            }
+            if (m.kind === "user") {
+              return <UserBubble key={m.id} text={m.text} />;
+            }
+            if (m.kind === "assistant") {
+              return <AssistantMessage key={m.id} msg={m} />;
+            }
+            return null;
+          })}
+
+          {stream.result && (
+            <ResultFooter
+              duration_ms={stream.result.duration_ms}
+              total_cost_usd={stream.result.total_cost_usd}
+              usage={stream.result.usage}
+            />
+          )}
+
+          {stream.status === "running" && (
+            <div className="animate-pulse text-xs text-neutral-400">
+              Claude is thinking...
             </div>
-            <div className="flex items-center gap-2">
-              <TokenUsageIndicator messages={thread.messages} />
-              <ExportTrigger threadId={threadId} />
-              <ArtifactTrigger />
+          )}
+
+          {stream.status === "error" && (
+            <div className="text-xs text-red-500">
+              Error:{" "}
+              {stream.error instanceof Error
+                ? stream.error.message
+                : String(stream.error)}
             </div>
-          </header>
-          <main className="flex min-h-0 max-w-full grow flex-col">
-            <div className="flex size-full justify-center">
-              <MessageList
-                className={cn("size-full", !isNewThread && "pt-10")}
-                threadId={threadId}
-                thread={thread}
-                paddingBottom={messageListPaddingBottom}
-              />
-            </div>
-            <div className="absolute right-0 bottom-0 left-0 z-30 flex justify-center px-4">
-              <div
-                className={cn(
-                  "relative w-full",
-                  isNewThread && "-translate-y-[calc(50vh-96px)]",
-                  isNewThread
-                    ? "max-w-(--container-width-sm)"
-                    : "max-w-(--container-width-md)",
-                )}
-              >
-                <div className="absolute -top-4 right-0 left-0 z-0">
-                  <div className="absolute right-0 bottom-0 left-0">
-                    <TodoList
-                      className="bg-background/5"
-                      todos={thread.values.todos ?? []}
-                      hidden={
-                        !thread.values.todos || thread.values.todos.length === 0
-                      }
-                    />
-                  </div>
-                </div>
-                {mounted ? (
-                  <InputBox
-                    className={cn("bg-background/5 w-full -translate-y-4")}
-                    isNewThread={isNewThread}
-                    threadId={threadId}
-                    autoFocus={isNewThread}
-                    status={
-                      thread.error
-                        ? "error"
-                        : thread.isLoading
-                          ? "streaming"
-                          : "ready"
-                    }
-                    context={settings.context}
-                    extraHeader={
-                      isNewThread && <Welcome mode={settings.context.mode} />
-                    }
-                    disabled={
-                      env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" ||
-                      isUploading
-                    }
-                    onContextChange={(context) =>
-                      setSettings("context", context)
-                    }
-                    onFollowupsVisibilityChange={setShowFollowups}
-                    onSubmit={handleSubmit}
-                    onStop={handleStop}
-                  />
-                ) : (
-                  <div
-                    aria-hidden="true"
-                    className={cn(
-                      "bg-background/5 h-32 w-full -translate-y-4 rounded-2xl border",
-                    )}
-                  />
-                )}
-                {env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true" && (
-                  <div className="text-muted-foreground/67 w-full translate-y-12 text-center text-xs">
-                    {t.common.notAvailableInDemoMode}
-                  </div>
-                )}
-              </div>
-            </div>
-          </main>
+          )}
         </div>
-      </ChatBox>
-    </ThreadContext.Provider>
+      </div>
+
+      {/* Todos strip (when present) */}
+      {stream.todos.length > 0 && (
+        <div className="border-t border-neutral-200 px-4 py-2 dark:border-neutral-800">
+          <div className="mx-auto max-w-3xl">
+            <div className="mb-1 text-xs font-medium text-neutral-500">
+              Tasks
+            </div>
+            <div className="space-y-1">
+              {stream.todos.map((todo, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="inline-block w-4 text-center">
+                    {todo.status === "completed"
+                      ? "\u2705"
+                      : todo.status === "in_progress"
+                        ? "\u{1F504}"
+                        : "\u2B1C"}
+                  </span>
+                  <span
+                    className={
+                      todo.status === "completed"
+                        ? "text-neutral-400 line-through"
+                        : ""
+                    }
+                  >
+                    {todo.content}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Composer */}
+      <div className="border-t border-neutral-200 px-4 py-3 dark:border-neutral-800">
+        <div className="mx-auto flex max-w-3xl gap-2">
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Type a message..."
+            disabled={stream.status === "running"}
+            className="flex-1 rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 dark:border-neutral-700"
+            autoFocus
+          />
+          {stream.status === "running" ? (
+            <button
+              onClick={stream.cancel}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700"
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={() => void handleSend()}
+              disabled={!input.trim()}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              Send
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
