@@ -137,7 +137,7 @@ class Db:
         sql += " ORDER BY name"
         with self.engine.connect() as conn:
             rows = conn.execute(text(sql), {"uid": user_id}).mappings().all()
-        return [McpRow(**dict(r)) for r in rows]
+        return [McpRow(**{**dict(r), "enabled": bool(r["enabled"])}) for r in rows]
 
     # ------------------------------------------------------------------
     # Skills
@@ -186,4 +186,4 @@ class Db:
         sql += " ORDER BY name"
         with self.engine.connect() as conn:
             rows = conn.execute(text(sql), {"uid": user_id}).mappings().all()
-        return [SkillRow(**dict(r)) for r in rows]
+        return [SkillRow(**{**dict(r), "enabled": bool(r["enabled"])}) for r in rows]

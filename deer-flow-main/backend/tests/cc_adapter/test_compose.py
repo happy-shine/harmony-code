@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from app.cc_adapter.compose import compose_mcp_config, compose_skills_dir
 
 
@@ -77,6 +79,38 @@ def test_compose_mcp_config_http_transport(tmp_path, db_with_rows):
     }
 
 
+def test_compose_mcp_config_stdio_without_command_raises(tmp_path, db_with_rows):
+    db_with_rows.insert_mcp(user_id="u1", name="broken", transport="stdio")
+    # no command set
+    with pytest.raises(ValueError, match="missing command"):
+        compose_mcp_config(db=db_with_rows, user_id="u1", thread_id="t1", tmp_root=tmp_path)
+
+
+def test_compose_mcp_config_http_without_url_raises(tmp_path, db_with_rows):
+    db_with_rows.insert_mcp(user_id="u1", name="broken", transport="http")
+    # no url set
+    with pytest.raises(ValueError, match="missing url"):
+        compose_mcp_config(db=db_with_rows, user_id="u1", thread_id="t1", tmp_root=tmp_path)
+
+
+def test_compose_mcp_config_sse_transport(tmp_path, db_with_rows):
+    db_with_rows.insert_mcp(user_id="u1", name="s", transport="sse",
+                            url="https://example/sse")
+    out = compose_mcp_config(db=db_with_rows, user_id="u1", thread_id="t1", tmp_root=tmp_path)
+    data = json.loads(Path(out).read_text())
+    assert data["mcpServers"]["s"] == {"url": "https://example/sse"}
+
+
+def test_compose_mcp_config_file_is_private(tmp_path, db_with_rows):
+    """MCP config may contain API keys in env; file must not be world-readable."""
+    import stat
+    db_with_rows.insert_mcp(user_id="u1", name="k", transport="stdio",
+                            command="echo", env={"API_KEY": "secret"})
+    out = compose_mcp_config(db=db_with_rows, user_id="u1", thread_id="t1", tmp_root=tmp_path)
+    mode = stat.S_IMODE(out.stat().st_mode)
+    assert mode == 0o600, f"Expected 0o600, got 0o{mode:o}"
+
+
 def test_compose_skills_dir_symlinks(tmp_path, db_with_rows):
     skill_src = tmp_path / "skill1"
     skill_src.mkdir()
@@ -104,3 +138,13 @@ def test_compose_skills_dir_replaces_existing(tmp_path, db_with_rows):
     compose_skills_dir(db=db_with_rows, user_id="u1", skills_dir=target)
     assert not (target / "stale").exists()
     assert (target / "skill2").is_symlink()
+
+
+def test_compose_skills_dir_skips_disabled(tmp_path, db_with_rows):
+    skill_src = tmp_path / "off_skill"
+    skill_src.mkdir()
+    db_with_rows.insert_skill(user_id="u1", name="off_skill", source="upload",
+                              path=str(skill_src), enabled=False)
+    target = tmp_path / ".claude/skills"
+    compose_skills_dir(db=db_with_rows, user_id="u1", skills_dir=target)
+    assert not (target / "off_skill").exists()

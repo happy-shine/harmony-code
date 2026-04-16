@@ -52,9 +52,12 @@ def compose_mcp_config(
             entry["env"] = json.loads(r.env_json)
         servers[r.name] = entry
 
-    out_path = tmp_root / f"mcp-{thread_id}-{os.getpid()}.json"
+    out_path = tmp_root / f"mcp-{thread_id}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps({"mcpServers": servers}))
+    tmp_path = out_path.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps({"mcpServers": servers}))
+    os.chmod(tmp_path, 0o600)
+    os.replace(tmp_path, out_path)
     return out_path
 
 
