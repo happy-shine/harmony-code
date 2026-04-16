@@ -1,7 +1,8 @@
 """Unit tests for ``app.db`` methods that aren't covered by router tests.
 
-Currently: ``user_prefs`` CRUD (Task 3.6). Router-level tests live under
-``tests/gateway/`` — this file is for the raw ``Db`` API.
+Currently: ``user_prefs`` CRUD (Task 3.6) and ``uploads`` CRUD
+(Task 4.3). Router-level tests live under ``tests/gateway/`` — this
+file is for the raw ``Db`` API.
 """
 from __future__ import annotations
 
@@ -83,3 +84,89 @@ def test_upsert_user_prefs_is_per_user(db):
     b = db.get_user_prefs("u_bob")
     assert a is not None and a.default_model == "sonnet"
     assert b is not None and b.default_model == "opus"
+
+
+# --- uploads (Task 4.3) ---------------------------------------------------
+
+
+def test_insert_upload_and_list(db):
+    """insert_upload returns ``up_<hex>``; list_uploads_for_thread orders newest first."""
+    first = db.insert_upload(
+        thread_id="t_one",
+        user_id=None,
+        filename="a.txt",
+        size=3,
+        content_type="text/plain",
+    )
+    second = db.insert_upload(
+        thread_id="t_one",
+        user_id="u_default",
+        filename="b.bin",
+        size=10,
+        content_type=None,
+    )
+    # Not ours (filters by thread_id)
+    db.insert_upload(
+        thread_id="t_other",
+        user_id=None,
+        filename="c.txt",
+        size=1,
+        content_type="text/plain",
+    )
+
+    assert first.startswith("up_")
+    assert second.startswith("up_")
+    assert first != second
+
+    rows = db.list_uploads_for_thread("t_one")
+    assert len(rows) == 2
+    # Newest first. Both inserted back-to-back — created_at may tie on fast
+    # SQLite; guard against flakiness by asserting set membership + absence of
+    # the other-thread row.
+    ids = {r.id for r in rows}
+    assert ids == {first, second}
+    assert all(r.thread_id == "t_one" for r in rows)
+    by_id = {r.id: r for r in rows}
+    assert by_id[first].filename == "a.txt"
+    assert by_id[first].size == 3
+    assert by_id[first].content_type == "text/plain"
+    assert by_id[first].user_id is None
+    assert by_id[second].user_id == "u_default"
+    assert by_id[second].content_type is None
+
+
+def test_list_uploads_for_thread_empty(db):
+    assert db.list_uploads_for_thread("t_nothing") == []
+
+
+def test_get_upload_missing_returns_none(db):
+    assert db.get_upload("up_does_not_exist") is None
+
+
+def test_get_upload_returns_row(db):
+    uid = db.insert_upload(
+        thread_id="t_x",
+        user_id=None,
+        filename="f.txt",
+        size=4,
+        content_type="text/plain",
+    )
+    row = db.get_upload(uid)
+    assert row is not None
+    assert row.id == uid
+    assert row.thread_id == "t_x"
+    assert row.filename == "f.txt"
+
+
+def test_delete_upload(db):
+    uid = db.insert_upload(
+        thread_id="t_y",
+        user_id=None,
+        filename="gone.txt",
+        size=1,
+        content_type=None,
+    )
+    assert db.get_upload(uid) is not None
+    db.delete_upload(uid)
+    assert db.get_upload(uid) is None
+    assert db.list_uploads_for_thread("t_y") == []

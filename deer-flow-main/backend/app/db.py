@@ -15,6 +15,7 @@ import json as _json
 import os
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
@@ -63,6 +64,25 @@ class SkillRow:
     source: str
     path: str
     enabled: bool
+
+
+@dataclass
+class UploadRow:
+    """One row of ``uploads`` as consumed by the uploads router (Task 4.3).
+
+    ``created_at`` is populated by the ``server_default=sa.func.now()`` in
+    the alembic migration — SQLAlchemy hands it back as a naive
+    :class:`datetime.datetime`; the router serializes it via
+    :meth:`datetime.isoformat` for the JSON response.
+    """
+
+    id: str
+    thread_id: str
+    user_id: str | None
+    filename: str
+    size: int
+    content_type: str | None
+    created_at: datetime | None
 
 
 @dataclass
@@ -377,4 +397,72 @@ class Db:
                     "UPDATE user_prefs SET default_model = :dm WHERE user_id = :uid"
                 ),
                 {"uid": user_id, "dm": default_model},
+            )
+
+    # ------------------------------------------------------------------
+    # Uploads (M4 task 4.3)
+    # ------------------------------------------------------------------
+    def insert_upload(
+        self,
+        *,
+        thread_id: str,
+        user_id: str | None,
+        filename: str,
+        size: int,
+        content_type: str | None,
+    ) -> str:
+        """Insert an ``uploads`` row and return its generated id."""
+        new_id = f"up_{uuid.uuid4().hex[:12]}"
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO uploads (id, thread_id, user_id, filename,
+                        size, content_type)
+                    VALUES (:id, :tid, :uid, :fn, :sz, :ct)
+                    """
+                ),
+                {
+                    "id": new_id,
+                    "tid": thread_id,
+                    "uid": user_id,
+                    "fn": filename,
+                    "sz": size,
+                    "ct": content_type,
+                },
+            )
+        return new_id
+
+    def list_uploads_for_thread(self, thread_id: str) -> list[UploadRow]:
+        """All upload rows for ``thread_id``, newest first.
+
+        Tiebreaker on ``id DESC`` keeps ordering deterministic when two
+        rows share a ``created_at`` value (SQLite's default precision
+        is 1s, and back-to-back inserts in tests do tie).
+        """
+        sql = (
+            "SELECT id, thread_id, user_id, filename, size, content_type, "
+            "created_at FROM uploads WHERE thread_id = :tid "
+            "ORDER BY created_at DESC, id DESC"
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(text(sql), {"tid": thread_id}).mappings().all()
+        return [UploadRow(**dict(r)) for r in rows]
+
+    def get_upload(self, upload_id: str) -> UploadRow | None:
+        sql = (
+            "SELECT id, thread_id, user_id, filename, size, content_type, "
+            "created_at FROM uploads WHERE id = :id"
+        )
+        with self.engine.connect() as conn:
+            row = conn.execute(text(sql), {"id": upload_id}).mappings().first()
+        if row is None:
+            return None
+        return UploadRow(**dict(row))
+
+    def delete_upload(self, upload_id: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM uploads WHERE id = :id"),
+                {"id": upload_id},
             )
