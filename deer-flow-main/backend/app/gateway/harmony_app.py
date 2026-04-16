@@ -2,6 +2,7 @@
 M5 will consolidate with the post-LangGraph-deletion gateway. Until then this runs independently."""
 from fastapi import FastAPI
 
+from app.gateway.routers import harmony_models as models_router
 from app.gateway.routers import mcp as mcp_router
 from app.gateway.routers import messages as messages_router
 from app.gateway.routers import skills as skills_router
@@ -12,6 +13,7 @@ def create_harmony_app() -> FastAPI:
     app.include_router(messages_router.router)
     app.include_router(mcp_router.router)
     app.include_router(skills_router.router)
+    app.include_router(models_router.router)
     return app
 
 
