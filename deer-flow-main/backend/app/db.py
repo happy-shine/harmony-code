@@ -139,6 +139,69 @@ class Db:
             rows = conn.execute(text(sql), {"uid": user_id}).mappings().all()
         return [McpRow(**{**dict(r), "enabled": bool(r["enabled"])}) for r in rows]
 
+    def list_mcp_for_user(self, *, user_id: str) -> list[McpRow]:
+        """All rows (enabled + disabled) owned by ``user_id`` OR global (``user_id IS NULL``).
+
+        Used by the CRUD router; callers that want only enabled rows for a
+        CC spawn should still use :meth:`query_mcp_for_user`.
+        """
+        sql = (
+            "SELECT id, user_id, name, transport, command, args_json, url, "
+            "headers_json, env_json, enabled "
+            "FROM mcp_servers "
+            "WHERE (user_id = :uid OR user_id IS NULL) "
+            "ORDER BY name"
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(text(sql), {"uid": user_id}).mappings().all()
+        return [McpRow(**{**dict(r), "enabled": bool(r["enabled"])}) for r in rows]
+
+    def get_mcp(self, mcp_id: str) -> McpRow | None:
+        sql = (
+            "SELECT id, user_id, name, transport, command, args_json, url, "
+            "headers_json, env_json, enabled "
+            "FROM mcp_servers WHERE id = :id"
+        )
+        with self.engine.connect() as conn:
+            row = conn.execute(text(sql), {"id": mcp_id}).mappings().first()
+        if row is None:
+            return None
+        return McpRow(**{**dict(row), "enabled": bool(row["enabled"])})
+
+    def delete_mcp(self, mcp_id: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM mcp_servers WHERE id = :id"), {"id": mcp_id}
+            )
+
+    def update_mcp(self, mcp_id: str, patch: dict) -> None:
+        """Update only the columns present in ``patch``.
+
+        Recognized keys: ``name``, ``transport``, ``command``, ``args``,
+        ``url``, ``headers``, ``env``, ``enabled``. JSON-serializable
+        fields (``args``/``headers``/``env``) are ``json.dumps``'d before
+        storage; empty/falsy values are stored as ``NULL``. Unknown keys
+        are silently ignored (defensive for forward-compat).
+        """
+        JSON_FIELDS = {"args": "args_json", "headers": "headers_json", "env": "env_json"}
+        DIRECT = {"name", "transport", "command", "url", "enabled"}
+
+        sets: list[str] = []
+        params: dict = {"id": mcp_id}
+        for k, v in patch.items():
+            if k in DIRECT:
+                sets.append(f"{k} = :{k}")
+                params[k] = v
+            elif k in JSON_FIELDS:
+                col = JSON_FIELDS[k]
+                sets.append(f"{col} = :{col}")
+                params[col] = _json.dumps(v) if v else None
+        if not sets:
+            return
+        sql = f"UPDATE mcp_servers SET {', '.join(sets)} WHERE id = :id"
+        with self.engine.begin() as conn:
+            conn.execute(text(sql), params)
+
     # ------------------------------------------------------------------
     # Skills
     # ------------------------------------------------------------------
