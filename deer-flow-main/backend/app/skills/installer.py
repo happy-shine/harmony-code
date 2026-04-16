@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import subprocess
 import uuid
 import zipfile
 from pathlib import Path
@@ -102,6 +103,48 @@ def install_from_zip(
     try:
         with zipfile.ZipFile(zip_stream) as zf:
             _zip_safe_extract(zf, skill_dir)
+        _validate_skill_dir(skill_dir)
+    except Exception:
+        shutil.rmtree(skill_dir, ignore_errors=True)
+        raise
+    return skill_id, skill_dir
+
+
+def install_from_git(
+    *, url: str, data_dir: Path, timeout: int = 60
+) -> tuple[str, Path]:
+    """Shallow-clone a git repo into ``skills_store/{id}/``.
+
+    Uses ``git clone --depth 1 -- <url> <dest>``. The ``--`` terminator
+    prevents a URL starting with ``-`` from being parsed as a flag;
+    ``subprocess.run`` without ``shell=True`` avoids shell expansion
+    entirely. ``timeout`` bounds a hung clone so the gateway can never
+    block indefinitely on a slow remote.
+    """
+    if not (
+        url.startswith("https://")
+        or url.startswith("http://")
+        or url.startswith("git@")
+    ):
+        raise SkillInstallError(f"Unsupported git URL scheme: {url!r}")
+    skill_id = _new_skill_id()
+    skill_dir = data_dir / "skills_store" / skill_id
+    # Don't pre-create skill_dir — ``git clone`` wants the target to not
+    # exist (otherwise it errors) unless the dir is empty. We create the
+    # parent ``skills_store/`` but leave the leaf to the clone.
+    skill_dir.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        result = subprocess.run(
+            ["git", "clone", "--depth", "1", "--", url, str(skill_dir)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            raise SkillInstallError(
+                f"git clone failed (exit {result.returncode}): "
+                f"{result.stderr.strip()[-500:]}"
+            )
         _validate_skill_dir(skill_dir)
     except Exception:
         shutil.rmtree(skill_dir, ignore_errors=True)

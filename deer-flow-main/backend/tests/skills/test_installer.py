@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import io
 import zipfile
+from pathlib import Path
 
 import pytest
 
 from app.skills.installer import (
     SkillInstallError,
+    install_from_git,
     install_from_zip,
     parse_skill_name,
     uninstall,
@@ -137,6 +139,96 @@ def test_parse_skill_name_fallback_when_no_name_key(tmp_path):
     d.mkdir()
     (d / "SKILL.md").write_text("---\ndescription: just a desc\n---\n")
     assert parse_skill_name(d) == "nokey"
+
+
+# --- install_from_git -----------------------------------------------------
+
+
+def test_install_from_git_rejects_bad_scheme(tmp_path):
+    with pytest.raises(SkillInstallError, match="Unsupported"):
+        install_from_git(url="ftp://evil/x.git", data_dir=tmp_path)
+
+
+def test_install_from_git_rejects_leading_dash(tmp_path):
+    # A URL starting with ``-`` would be caught by scheme rejection
+    # regardless of the ``--`` terminator; belt-and-braces.
+    with pytest.raises(SkillInstallError, match="Unsupported"):
+        install_from_git(url="--upload-pack=evil", data_dir=tmp_path)
+
+
+def test_install_from_git_clone_failure_cleans_up(tmp_path, monkeypatch):
+    import subprocess
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001 — match signature shape
+        class R:
+            returncode = 128
+            stderr = "fatal: bad url"
+            stdout = ""
+
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(SkillInstallError, match="git clone failed"):
+        install_from_git(
+            url="https://example/repo.git", data_dir=tmp_path
+        )
+    # Partial dir cleaned up so a retry can land on the same id-space.
+    assert not any((tmp_path / "skills_store").glob("sk_*"))
+
+
+def test_install_from_git_accepts_https_and_ssh(tmp_path, monkeypatch):
+    """Happy-path URL schemes pass scheme validation and reach git."""
+    import subprocess
+
+    called_urls: list[str] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        called_urls.append(cmd[cmd.index("--") + 1])
+
+        class R:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        # Stamp the clone target with a valid SKILL.md so validation passes.
+        # cmd[-1] is the destination path (after ``--``).
+        dest = Path(cmd[-1])
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "SKILL.md").write_text("---\nname: cloned\n---\n")
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    for url in ("https://host/repo.git", "git@host:org/repo.git"):
+        # Each call needs its own data_dir — the skill_id collides across
+        # iterations only via uuid, so reuse the same dir is fine here.
+        install_from_git(url=url, data_dir=tmp_path)
+    assert called_urls == [
+        "https://host/repo.git",
+        "git@host:org/repo.git",
+    ]
+
+
+def test_install_from_git_missing_skill_md_cleans_up(tmp_path, monkeypatch):
+    """Successful clone without SKILL.md is rejected and dir removed."""
+    import subprocess
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        class R:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        dest = Path(cmd[-1])
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "README.md").write_text("no skill file")
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(SkillInstallError, match="SKILL.md"):
+        install_from_git(
+            url="https://host/repo.git", data_dir=tmp_path
+        )
+    assert not any((tmp_path / "skills_store").glob("sk_*"))
 
 
 # --- uninstall ------------------------------------------------------------

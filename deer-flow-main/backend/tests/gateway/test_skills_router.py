@@ -169,6 +169,99 @@ def test_global_row_visible_in_list(client):
     assert match["user_id"] is None
 
 
+# --- POST /git ------------------------------------------------------------
+
+
+def test_git_install_rejects_bad_scheme(client):
+    c, _ = client
+    r = c.post("/api/skills/git", json={"url": "ftp://evil/x.git"})
+    assert r.status_code == 400
+
+
+def test_git_install_success_creates_row(client, monkeypatch):
+    """Stub subprocess.run so the test doesn't hit the network."""
+    import subprocess
+
+    c, tmp = client
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        class R:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        dest = Path(cmd[-1])
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "SKILL.md").write_text("---\nname: from_git\n---\n")
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    r = c.post(
+        "/api/skills/git",
+        json={"url": "https://example.com/fake/repo.git"},
+    )
+    assert r.status_code == 201, r.text
+    out = r.json()
+    assert out["source"] == "git"
+    assert out["name"] == "from_git"
+    p = Path(out["path"])
+    assert p.is_dir()
+    assert (p / "SKILL.md").is_file()
+    assert str(p).startswith(str(tmp / "skills_store"))
+
+
+def test_git_install_name_override(client, monkeypatch):
+    import subprocess
+
+    c, _ = client
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        class R:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        dest = Path(cmd[-1])
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "SKILL.md").write_text("---\nname: ignored\n---\n")
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    r = c.post(
+        "/api/skills/git",
+        json={"url": "https://example.com/r.git", "name": "custom"},
+    )
+    assert r.status_code == 201
+    assert r.json()["name"] == "custom"
+
+
+def test_git_install_clone_failure_returns_400(client, monkeypatch):
+    import subprocess
+
+    c, tmp = client
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        class R:
+            returncode = 128
+            stderr = "fatal: repository not found"
+            stdout = ""
+
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    r = c.post(
+        "/api/skills/git",
+        json={"url": "https://example.com/does/not/exist.git"},
+    )
+    assert r.status_code == 400
+    # No row was inserted and no leftover skills_store dir remains.
+    assert c.get("/api/skills").json() == []
+    store = tmp / "skills_store"
+    assert not store.exists() or not any(store.glob("sk_*"))
+
+
 # --- PATCH / update -------------------------------------------------------
 
 

@@ -1,7 +1,14 @@
 """Skill install + CRUD backed by ``harmony.db``.
 
-Install source (first commit): zip upload via multipart form-data at
-``POST /api/skills/upload``. The git-clone source lands in a follow-up commit.
+Install sources:
+
+* zip upload via multipart form-data at ``POST /api/skills/upload``
+* git clone via JSON body at ``POST /api/skills/git``
+
+Two endpoints rather than one branching on content-type: the request
+shapes (multipart vs JSON) and the Pydantic/OpenAPI contracts are
+cleaner separate — the frontend picks based on the install dialog, not
+based on request dispatch.
 
 Enabled rows are symlinked into ``<thread>/.claude/skills/`` on every CC
 spawn by :func:`app.cc_adapter.compose.compose_skills_dir`, so edits through
@@ -18,12 +25,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db import SkillRow
 from app.gateway.deps import current_user_id, get_db
 from app.skills.installer import (
     SkillInstallError,
+    install_from_git,
     install_from_zip,
     parse_skill_name,
     uninstall,
@@ -55,6 +63,22 @@ class SkillPatch(BaseModel):
 
     name: str | None = None
     enabled: bool | None = None
+
+
+class GitInstallBody(BaseModel):
+    url: str = Field(
+        ...,
+        description=(
+            "HTTPS or git@ URL of a repository whose root contains SKILL.md"
+        ),
+    )
+    name: str | None = Field(
+        None,
+        description=(
+            "Optional override for the skill name (defaults to "
+            "SKILL.md front-matter)"
+        ),
+    )
 
 
 def _row_to_out(r: SkillRow) -> SkillOut:
@@ -112,6 +136,36 @@ async def upload_skill(
     row = db.get_skill(new_id)
     if row is None:
         # Insert just succeeded; this would be a concurrent delete racing us.
+        raise HTTPException(500, "inserted row not found")
+    return _row_to_out(row)
+
+
+@router.post(
+    "/git",
+    response_model=SkillOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def git_install_skill(
+    body: GitInstallBody, user_id: str = Depends(current_user_id)
+) -> SkillOut:
+    """Install a skill by shallow-cloning ``body.url`` into ``skills_store``.
+
+    Validation happens post-clone (``SKILL.md`` must exist at repo root);
+    on any failure the partially-cloned directory is cleaned up.
+    """
+    try:
+        _skill_id, skill_dir = install_from_git(
+            url=body.url, data_dir=_data_dir()
+        )
+    except SkillInstallError as e:
+        raise HTTPException(400, str(e))
+    name = body.name or parse_skill_name(skill_dir)
+    db = get_db()
+    new_id = db.insert_skill(
+        user_id=user_id, name=name, source="git", path=str(skill_dir)
+    )
+    row = db.get_skill(new_id)
+    if row is None:
         raise HTTPException(500, "inserted row not found")
     return _row_to_out(row)
 
