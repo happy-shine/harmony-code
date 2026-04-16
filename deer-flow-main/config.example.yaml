@@ -12,7 +12,7 @@
 # ============================================================================
 # Bump this number when the config schema changes.
 # Run `make config-upgrade` to merge new fields into your local config.yaml.
-config_version: 7
+config_version: 8
 
 # ============================================================================
 # Logging
@@ -87,7 +87,7 @@ models:
   # into <think> tags or dropped entirely (ollama/ollama#15293). The native Ollama API
   # (/api/chat) correctly separates thinking from response content.
   #
-  # Install: cd backend && uv pip install 'deerflow-harness[ollama]'
+  # Install: cd backend && uv pip install langchain-ollama
   #
   # - name: qwen3-local
   #   display_name: Qwen3 32B (Ollama)
@@ -725,137 +725,36 @@ skill_evolution:
   moderation_model_name: null  # Model for LLM-based security scanning (null = use default model)
 
 # ============================================================================
-# Checkpointer Configuration
+# Claude Code Adapter Configuration
 # ============================================================================
-# Configure state persistence for the embedded DeerFlowClient.
-# The LangGraph Server manages its own state persistence separately
-# via the server infrastructure (this setting does not affect it).
+# Runtime settings for the CC (claude-code CLI) subprocess spawned per turn by
+# app/cc_adapter/.  Each user turn runs a one-shot `claude -p --resume <sid>`,
+# streaming jsonl events back to the frontend via SSE. The CC session jsonl is
+# the source-of-truth for conversation history — the DB only tracks
+# thread_id ↔ session_id + cwd.
 #
-# When configured, DeerFlowClient will automatically use this checkpointer,
-# enabling multi-turn conversations to persist across process restarts.
-#
-# Supported types:
-#   memory   - In-process only. State is lost when the process exits. (default)
-#   sqlite   - File-based SQLite persistence. Survives restarts.
-#              Requires: uv add langgraph-checkpoint-sqlite
-#   postgres - PostgreSQL persistence. Suitable for multi-process deployments.
-#              Requires: uv add langgraph-checkpoint-postgres psycopg[binary] psycopg-pool
-#
-# Examples:
-#
-# In-memory (default when omitted — no persistence):
-# checkpointer:
-#   type: memory
-#
-# SQLite (file-based, single-process):
-checkpointer:
-  type: sqlite
-  connection_string: checkpoints.db
-#
-# PostgreSQL (multi-process, production):
-# checkpointer:
-#   type: postgres
-#   connection_string: postgresql://user:password@localhost:5432/deerflow
+# All keys are optional — safe defaults are baked into the adapter.
 
-# ============================================================================
-# IM Channels Configuration
-# ============================================================================
-# Connect DeerFlow to external messaging platforms.
-# All channels use outbound connections (WebSocket or polling) — no public IP required.
-
-# channels:
-#   # LangGraph Server URL for thread/message management (default: http://localhost:2024)
-#   # For Docker deployments, use the Docker service name instead of localhost:
-#   #   langgraph_url: http://langgraph:2024
-#   #   gateway_url: http://gateway:8001
-#   langgraph_url: http://localhost:2024
-#   # Gateway API URL for auxiliary queries like /models, /memory (default: http://localhost:8001)
-#   gateway_url: http://localhost:8001
-#   #
-#   # Docker Compose note:
-#   # If channels run inside the gateway container, use container DNS names instead
-#   # of localhost, for example:
-#   # langgraph_url: http://langgraph:2024
-#   # gateway_url: http://gateway:8001
-#   # You can also set DEER_FLOW_CHANNELS_LANGGRAPH_URL / DEER_FLOW_CHANNELS_GATEWAY_URL.
+# cc_adapter:
+#   # Absolute path to the `claude` binary (default: looked up on $PATH).
+#   # binary: /usr/local/bin/claude
 #
-#   # Optional: default mobile/session settings for all IM channels
-#   session:
-#     assistant_id: lead_agent  # or a custom agent name; custom agents route via lead_agent + agent_name
-#     config:
-#       recursion_limit: 100
-#     context:
-#       thinking_enabled: true
-#       is_plan_mode: false
-#       subagent_enabled: false
+#   # Maximum wall-clock time (seconds) for one turn before the adapter
+#   # terminates the CC subprocess. Default: 600.
+#   turn_timeout_seconds: 600
 #
-#   feishu:
-#     enabled: false
-#     app_id: $FEISHU_APP_ID
-#     app_secret: $FEISHU_APP_SECRET
-#     # domain: https://open.feishu.cn       # China (default)
-#     # domain: https://open.larksuite.com   # International
+#   # How many concurrent CC subprocesses the gateway will run across all
+#   # threads. Surplus requests queue. Default: 8.
+#   max_concurrent_turns: 8
 #
-#   slack:
-#     enabled: false
-#     bot_token: $SLACK_BOT_TOKEN     # xoxb-...
-#     app_token: $SLACK_APP_TOKEN     # xapp-... (Socket Mode)
-#     allowed_users: []               # empty = allow all
-#
-#   telegram:
-#     enabled: false
-#     bot_token: $TELEGRAM_BOT_TOKEN
-#     allowed_users: []               # empty = allow all
-#
-#   wechat:
-#     enabled: false
-#     bot_token: $WECHAT_BOT_TOKEN
-#     ilink_bot_id: $WECHAT_ILINK_BOT_ID
-#     # Optional: allow first-time QR bootstrap when bot_token is absent
-#     qrcode_login_enabled: true
-#     # Optional: sent as iLink-App-Id header when provided
-#     ilink_app_id: ""
-#     # Optional: sent as SKRouteTag header when provided
-#     route_tag: ""
-#     allowed_users: []               # empty = allow all
-#     # Optional: long-polling timeout in seconds
-#     polling_timeout: 35
-#     # Optional: QR poll interval in seconds when qrcode_login_enabled is true
-#     qrcode_poll_interval: 2
-#     # Optional: QR bootstrap timeout in seconds
-#     qrcode_poll_timeout: 180
-#     # Optional: persist getupdates cursor under the gateway container volume
-#     state_dir: ./.deer-flow/wechat/state
-#     # Optional: max inbound image size in bytes before skipping download
-#     max_inbound_image_bytes: 20971520
-#     # Optional: max outbound image size in bytes before skipping upload
-#     max_outbound_image_bytes: 20971520
-#     # Optional: max inbound file size in bytes before skipping download
-#     max_inbound_file_bytes: 52428800
-#     # Optional: max outbound file size in bytes before skipping upload
-#     max_outbound_file_bytes: 52428800
-#     # Optional: allowed file extensions for regular file receive/send
-#     allowed_file_extensions: [".txt", ".md", ".pdf", ".csv", ".json", ".yaml", ".yml", ".xml", ".html", ".log", ".zip", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".rtf"]
-#
-#     # Optional: channel-level session overrides
-#     session:
-#       assistant_id: mobile-agent  # custom agent names are supported here too
-#       context:
-#         thinking_enabled: false
-#
-#       # Optional: per-user overrides by user_id
-#       users:
-#         "123456789":
-#           assistant_id: vip-agent
-#           config:
-#             recursion_limit: 150
-#           context:
-#             thinking_enabled: true
-#             subagent_enabled: true
-#   wecom:
-#     enabled: false
-#     bot_id: $WECOM_BOT_ID
-#     bot_secret: $WECOM_BOT_SECRET
+#   # Environment variables passed through to the CC subprocess. Only keys
+#   # listed here are forwarded from the gateway's environment (allowlist).
+#   # Useful for MCP server credentials and model-provider API keys.
+#   # env_passthrough:
+#   #   - ANTHROPIC_API_KEY
+#   #   - OPENAI_API_KEY
+#   #   - HTTP_PROXY
+#   #   - HTTPS_PROXY
 
 # ============================================================================
 # Guardrails Configuration
