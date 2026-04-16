@@ -12,6 +12,29 @@ from pathlib import Path
 
 import httpx
 import pytest
+from alembic import command
+from alembic.config import Config
+
+
+def _run_harmony_migrations(data_dir: Path) -> None:
+    """Apply alembic head so harmony.db has the schema send_message expects.
+
+    alembic/env.py resolves the DB url from ``$HARMONY_DATA_DIR`` and
+    overrides whatever we pass on Config, so we have to point that env var
+    at ``data_dir`` for the duration of the migration.
+    """
+    backend_root = Path(__file__).resolve().parents[2]
+    prev = os.environ.get("HARMONY_DATA_DIR")
+    os.environ["HARMONY_DATA_DIR"] = str(data_dir)
+    try:
+        cfg = Config(str(backend_root / "alembic.ini"))
+        cfg.set_main_option("script_location", str(backend_root / "alembic"))
+        command.upgrade(cfg, "head")
+    finally:
+        if prev is None:
+            os.environ.pop("HARMONY_DATA_DIR", None)
+        else:
+            os.environ["HARMONY_DATA_DIR"] = prev
 
 
 def _free_port() -> int:
@@ -36,6 +59,8 @@ def gateway_server(tmp_path):
     """
     port = _free_port()
     url = f"http://127.0.0.1:{port}"
+
+    _run_harmony_migrations(tmp_path)
 
     env = os.environ.copy()
     env["HARMONY_DATA_DIR"] = str(tmp_path)

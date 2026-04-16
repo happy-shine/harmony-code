@@ -1,3 +1,10 @@
+"""Thread messages router: POST /api/threads/{tid}/messages streams CC output as SSE.
+
+Requires ``alembic upgrade head`` to have run against ``$HARMONY_DATA_DIR``
+before starting the server — :func:`send_message` composes an MCP config and
+skills directory from ``harmony.db`` on every spawn and will fail if the
+schema is missing.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -12,8 +19,10 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from app.cc_adapter.adapter import CCAdapter
+from app.cc_adapter.compose import compose_mcp_config, compose_skills_dir
 from app.cc_adapter.session_store import SessionStore
 from app.cc_adapter.types import SpawnConfig
+from app.db import Db, get_engine
 
 
 logger = logging.getLogger(__name__)
@@ -36,6 +45,19 @@ def _store() -> SessionStore:
     s = SessionStore(str(p))
     s.ensure_schema()
     return s
+
+
+def _db() -> Db:
+    return Db(get_engine(_data_dir()))
+
+
+def _current_user_id() -> str:
+    """M3 stub. M5 replaces with a real auth dep (better-auth).
+
+    Kept as a plain callable (not ``Depends``) so introducing the real dep
+    later only touches the handler signature.
+    """
+    return "u_default"
 
 
 def _thread_cwd(thread_id: str) -> Path:
@@ -70,11 +92,31 @@ async def send_message(tid: str, body: SendMessageBody, request: Request):
             raise HTTPException(409, "thread_busy")
         _inflight.add(tid)
 
+    # Compose per-spawn MCP config + skills dir from the user's DB rows.
+    # Rebuilt on every request so CRUD edits take effect on the next spawn
+    # without any caching layer. row.cwd is authoritative for workspace
+    # location (set at create_thread time); we only derive the thread root
+    # from data_dir for uploads/.claude placement.
+    user_id = _current_user_id()
+    data_dir = _data_dir()
+    tmp_root = data_dir / "tmp"
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    thread_root = data_dir / "threads" / tid / "user-data"
+    db = _db()
+    mcp_path = compose_mcp_config(
+        db=db, user_id=user_id, thread_id=tid, tmp_root=tmp_root
+    )
+    compose_skills_dir(
+        db=db, user_id=user_id, skills_dir=thread_root / ".claude" / "skills"
+    )
+
     adapter = CCAdapter()
     cfg = SpawnConfig(
         cwd=row.cwd,
         user_prompt=body.content,
         resume_session_id=row.session_id,
+        mcp_config_path=str(mcp_path),
+        add_dirs=[str(thread_root / "uploads")],
         permission_mode="bypassPermissions",
     )
 

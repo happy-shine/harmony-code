@@ -29,6 +29,12 @@ class CCAdapter:
             cmd += ["--model", cfg.model]
         for d in cfg.add_dirs:
             cmd += ["--add-dir", d]
+        # ``--mcp-config`` and ``--add-dir`` are declared as variadic in the
+        # CC CLI (``<configs...>`` / ``<directories...>``), so Commander.js
+        # greedily consumes subsequent positionals into whichever of them
+        # came last. A ``--`` terminator stops that consumption and forces
+        # the remaining token to be parsed as the prompt positional.
+        cmd.append("--")
         cmd.append(cfg.user_prompt)
         return cmd
 
