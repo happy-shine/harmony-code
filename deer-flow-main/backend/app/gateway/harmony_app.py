@@ -6,6 +6,7 @@ from app.gateway.routers import harmony_models as models_router
 from app.gateway.routers import mcp as mcp_router
 from app.gateway.routers import messages as messages_router
 from app.gateway.routers import skills as skills_router
+from app.gateway.routers import uploads as uploads_router
 from app.gateway.routers import workspace as workspace_router
 
 
@@ -16,6 +17,7 @@ def create_harmony_app() -> FastAPI:
     app.include_router(skills_router.router)
     app.include_router(models_router.router)
     app.include_router(workspace_router.router)
+    app.include_router(uploads_router.router)
     return app
 
 

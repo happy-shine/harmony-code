@@ -71,9 +71,11 @@ class UploadRow:
     """One row of ``uploads`` as consumed by the uploads router (Task 4.3).
 
     ``created_at`` is populated by the ``server_default=sa.func.now()`` in
-    the alembic migration — SQLAlchemy hands it back as a naive
-    :class:`datetime.datetime`; the router serializes it via
-    :meth:`datetime.isoformat` for the JSON response.
+    the alembic migration. Under SQLAlchemy's raw ``text()`` interface
+    against SQLite, the value comes back as an ISO string rather than a
+    typed :class:`datetime.datetime` (the sqlite3 DBAPI preserves the
+    column's text representation); the router accepts both and stringifies
+    for JSON.
     """
 
     id: str
@@ -82,7 +84,7 @@ class UploadRow:
     filename: str
     size: int
     content_type: str | None
-    created_at: datetime | None
+    created_at: datetime | str | None
 
 
 @dataclass
