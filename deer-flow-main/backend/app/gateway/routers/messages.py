@@ -125,6 +125,12 @@ async def send_message(
         # trailing prompt positional so the hash reflects flags only, per
         # design Section 5.
         argv_full = adapter.build_cmd(cfg)
+        # build_cmd contract: the prompt is the last positional (after the
+        # ``--`` terminator). We hash argv minus the prompt per spec — if
+        # that contract ever changes, the slice below drops the wrong
+        # element and every audit line silently mis-hashes. Fail loudly
+        # instead.
+        assert argv_full[-1] == cfg.user_prompt, "build_cmd contract: prompt must be the last element of argv"
         argv_without_prompt = argv_full[:-1]
         mcp_names = [r.name for r in db.query_mcp_for_user(user_id=user_id, enabled_only=True)]
         skill_names = [r.name for r in db.query_skills_for_user(user_id=user_id, enabled_only=True)]
