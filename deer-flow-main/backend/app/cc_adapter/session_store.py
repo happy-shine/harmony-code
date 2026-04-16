@@ -67,7 +67,18 @@ class SessionStore:
             # Migrate pre-5.3 DBs that have the table but no user_id column.
             cols = {row[1] for row in conn.execute("PRAGMA table_info(cc_thread_session)").fetchall()}
             if "user_id" not in cols:
-                conn.execute("ALTER TABLE cc_thread_session ADD COLUMN user_id TEXT")
+                # Belt-and-suspenders against a concurrent first-run race:
+                # two workers can both read the pre-migration PRAGMA,
+                # both try to ALTER, and the loser hits "duplicate column
+                # name". The PRAGMA guard above catches the common case;
+                # this try/except covers the narrow multi-process window
+                # where two ``ensure_schema`` calls overlap on the very
+                # first request against a fresh DB.
+                try:
+                    conn.execute("ALTER TABLE cc_thread_session ADD COLUMN user_id TEXT")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" not in str(e):
+                        raise
             # Index for per-user listings. CREATE INDEX IF NOT EXISTS is
             # idempotent and cheap; sqlite uses it for list_for_user.
             conn.execute("CREATE INDEX IF NOT EXISTS ix_cc_thread_session_user ON cc_thread_session(user_id)")
