@@ -295,6 +295,40 @@ def test_patch_toggles_enabled(client):
     assert r.json()["enabled"] is False
 
 
+def test_patch_rename_collision_returns_409(client):
+    """Renaming a skill to a name already used by the same user → 409.
+
+    The unique index ``ix_skills_user_name(user_id, name)`` enforces
+    one name per user; without explicit handling this would bubble up
+    as a 500 from the raw IntegrityError.
+    """
+    c, tmp = client
+    db = Db(get_engine(tmp))
+    d1 = tmp / "skills_store" / "a"
+    d1.mkdir(parents=True)
+    (d1 / "SKILL.md").write_text("---\nname: first\n---")
+    d2 = tmp / "skills_store" / "b"
+    d2.mkdir(parents=True)
+    (d2 / "SKILL.md").write_text("---\nname: second\n---")
+    id1 = db.insert_skill(
+        user_id="u_default", name="first", source="upload", path=str(d1)
+    )
+    db.insert_skill(
+        user_id="u_default", name="second", source="upload", path=str(d2)
+    )
+
+    # Rename "first" → "second" (already taken by the same user).
+    r = c.patch(f"/api/skills/{id1}", json={"name": "second"})
+    assert r.status_code == 409
+    assert "already exists" in r.json()["detail"].lower()
+
+    # Verify the original row kept its name — the failed UPDATE
+    # rolled back cleanly.
+    rows = c.get("/api/skills").json()
+    names = sorted(r["name"] for r in rows)
+    assert names == ["first", "second"]
+
+
 def test_patch_nonexistent_is_404(client):
     c, _ = client
     r = c.patch("/api/skills/sk_does_not_exist", json={"enabled": False})

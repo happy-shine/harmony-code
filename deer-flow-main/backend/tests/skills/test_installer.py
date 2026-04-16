@@ -208,6 +208,55 @@ def test_install_from_git_accepts_https_and_ssh(tmp_path, monkeypatch):
     ]
 
 
+def test_install_from_git_redacts_url_credentials_in_error(
+    tmp_path, monkeypatch
+):
+    """Error message must not echo the URL (which may embed user:password@)."""
+    import subprocess
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        class R:
+            returncode = 128
+            stderr = (
+                "fatal: could not read from "
+                "https://alice:hunter2@example.com/x.git"
+            )
+            stdout = ""
+
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    url = "https://alice:hunter2@example.com/x.git"
+    with pytest.raises(SkillInstallError) as exc_info:
+        install_from_git(url=url, data_dir=tmp_path)
+    msg = str(exc_info.value)
+    # The password MUST be gone. The username MUST NOT appear verbatim
+    # unless accompanied by a placeholder marker (``<url>`` or
+    # ``<redacted>``).
+    assert "hunter2" not in msg
+    assert "alice" not in msg or "<" in msg
+
+
+def test_install_from_zip_rejects_symlink_entry(tmp_path):
+    """Zip entries marked as symlinks (unix mode S_IFLNK) must be rejected.
+
+    Even though the current extractor treats them as regular files, a
+    future refactor to ``zf.extract()`` would happily create a real
+    symlink — so we reject at the source.
+    """
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        info = zipfile.ZipInfo("SKILL.md")
+        info.create_system = 3  # unix
+        # S_IFLNK (0o120000) OR permission bits, stored in the high
+        # half-word of external_attr.
+        info.external_attr = (0o120777 & 0xFFFF) << 16
+        zf.writestr(info, "/etc/passwd")
+    buf.seek(0)
+    with pytest.raises(SkillInstallError, match="symlink"):
+        install_from_zip(zip_stream=buf, data_dir=tmp_path)
+
+
 def test_install_from_git_missing_skill_md_cleans_up(tmp_path, monkeypatch):
     """Successful clone without SKILL.md is rejected and dir removed."""
     import subprocess

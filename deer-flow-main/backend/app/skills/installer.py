@@ -38,6 +38,28 @@ def _validate_skill_dir(skill_dir: Path) -> None:
         )
 
 
+def _redact_git_stderr(stderr: str, url: str) -> str:
+    """Remove credentials from git error output before surfacing to HTTP response.
+
+    Git's stderr commonly echoes the full clone URL (``fatal: could not
+    read from https://user:pass@host/x.git``). If the caller submitted a
+    URL with embedded credentials, that secret would leak into both the
+    400 response body and the gateway access log. Scrub it here so the
+    exception — and therefore the HTTP response — carries only a
+    placeholder. The raw stderr is still logged at DEBUG for operators.
+    """
+    # Replace literal URL with placeholder
+    redacted = stderr.replace(url, "<url>")
+    # Defensive: strip any user:password@ pattern git may have rewritten
+    # (e.g. after protocol upgrade), belt-and-braces.
+    redacted = re.sub(
+        r"(https?://)[^/@\s]+:[^/@\s]+@",
+        r"\1<redacted>@",
+        redacted,
+    )
+    return redacted
+
+
 def _zip_safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
     """Extract ``zf`` into ``dest``, rejecting zip-slip entries.
 
@@ -72,6 +94,18 @@ def _zip_safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
             name = name[len(root_prefix):]
         if not name:
             continue
+        # Reject symlink entries explicitly. A zip stores a symlink with
+        # unix mode ``0o120000`` in the high bits of ``external_attr``;
+        # the current ``zf.open(member)`` path treats it as a regular
+        # file and writes the link *target string* as file bytes —
+        # harmless today, but a future refactor to ``zf.extract()``
+        # would silently start creating real symlinks that could point
+        # at ``/etc/passwd``. Guard the invariant here.
+        file_mode = member.external_attr >> 16
+        if file_mode & 0o170000 == 0o120000:  # S_IFLNK
+            raise SkillInstallError(
+                f"Zip entry {member.filename!r} is a symlink; not supported"
+            )
         target = (dest / name).resolve()
         # Final belt-and-braces check: resolved target must live under dest.
         try:
@@ -141,9 +175,13 @@ def install_from_git(
             timeout=timeout,
         )
         if result.returncode != 0:
+            # Log full unredacted stderr for operator diagnosis; the
+            # exception (and therefore the HTTP response) only carries
+            # the scrubbed version so credentials in the URL don't leak.
+            logger.debug("git clone stderr (unredacted): %s", result.stderr)
+            sanitized = _redact_git_stderr(result.stderr.strip(), url)[-500:]
             raise SkillInstallError(
-                f"git clone failed (exit {result.returncode}): "
-                f"{result.stderr.strip()[-500:]}"
+                f"git clone failed (exit {result.returncode}): {sanitized}"
             )
         _validate_skill_dir(skill_dir)
     except Exception:

@@ -20,12 +20,14 @@ M3 scope: ``user_id`` is stubbed to ``"u_default"`` via
 """
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 
 from app.db import SkillRow
 from app.gateway.deps import current_user_id, get_db
@@ -37,6 +39,8 @@ from app.skills.installer import (
     uninstall,
 )
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 
@@ -185,7 +189,14 @@ def update_skill(
     # MCP router's convention.
     if row.user_id is None or row.user_id != user_id:
         raise HTTPException(403, "not yours")
-    db.update_skill(skill_id, patch.model_dump(exclude_unset=True))
+    try:
+        db.update_skill(skill_id, patch.model_dump(exclude_unset=True))
+    except IntegrityError as e:
+        # Unique index ``ix_skills_user_name(user_id, name)`` — rename
+        # collision with another skill owned by the same user. SQLAlchemy's
+        # ``text()`` raw queries wrap sqlite3's IntegrityError in this
+        # class, so catching the SQLA type is sufficient.
+        raise HTTPException(409, "skill name already exists") from e
     updated = db.get_skill(skill_id)
     assert updated is not None  # we just read it above under the same engine
     return _row_to_out(updated)
@@ -195,10 +206,14 @@ def update_skill(
 def delete_skill(
     skill_id: str, user_id: str = Depends(current_user_id)
 ) -> dict[str, Any]:
-    """Delete the DB row AND remove the ``skills_store`` directory.
+    """Delete the DB row first (source of truth), then clean up the filesystem.
 
-    ``uninstall`` is idempotent, so a partial failure (row gone but dir
-    present, or vice versa) is self-healing on the next call.
+    If filesystem cleanup fails, we leak a directory in ``skills_store/``
+    but the skill is correctly gone from ``compose_skills_dir``'s
+    perspective — a leaked dir is harmless disk bloat until M5's GC
+    sweep. The reverse ordering (rmtree then delete row) would leave a
+    dangling DB row whose ``path`` points at nothing, producing broken
+    symlinks on every subsequent CC spawn — strictly worse.
     """
     db = get_db()
     row = db.get_skill(skill_id)
@@ -206,6 +221,14 @@ def delete_skill(
         raise HTTPException(404, "skill not found")
     if row.user_id is None or row.user_id != user_id:
         raise HTTPException(403, "not yours")
-    uninstall(skill_dir=Path(row.path))
     db.delete_skill(skill_id)
+    try:
+        uninstall(skill_dir=Path(row.path))
+    except Exception as e:
+        # Row is already gone; a leaked dir is harmless until M5 gc.
+        logger.warning(
+            "skill row %s deleted but filesystem cleanup failed: %s",
+            skill_id,
+            e,
+        )
     return {"ok": True}
