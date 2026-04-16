@@ -259,3 +259,33 @@ def test_env_var_placeholder_is_expanded_before_insert(db, tmp_path, monkeypatch
     assert len(rows) == 1
     env = json.loads(rows[0].env_json)
     assert env == {"API_KEY": "s3cr3t"}
+
+
+# --- 7. Dry-run -----------------------------------------------------------
+
+
+def test_dry_run_logs_intent_but_makes_no_db_writes(db, tmp_path, caplog):
+    """``--dry-run`` must produce log lines describing the planned inserts
+    but leave the DB at zero rows."""
+    from scripts.migrate_extensions_config import main
+
+    path = _write_config(
+        tmp_path,
+        {
+            "mcpServers": {
+                "a": {"type": "stdio", "command": "true"},
+                "b": {"type": "http", "url": "https://y/z"},
+            },
+            "skills": {},
+        },
+    )
+    with caplog.at_level(logging.INFO):
+        rc = main(["--config", str(path), "--dry-run"])
+
+    assert rc == 0
+    assert _count_mcp(db) == 0  # no writes
+
+    # Must have logged the "would insert" intent for each server.
+    dry_logs = [r for r in caplog.records if "dry" in r.message.lower() or "would" in r.message.lower()]
+    names_in_logs = " ".join(r.message for r in dry_logs)
+    assert "a" in names_in_logs and "b" in names_in_logs

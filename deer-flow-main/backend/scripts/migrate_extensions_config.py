@@ -100,6 +100,13 @@ def migrate(*, config_path: str | None = None, dry_run: bool = False) -> int:
                 "MCP %r already present as a global row, skipping", name
             )
             continue
+        if dry_run:
+            logger.info(
+                "[dry-run] would insert MCP %r (transport=%s)",
+                name,
+                server.type,
+            )
+            continue
         db.insert_mcp(
             user_id=None,
             name=name,
