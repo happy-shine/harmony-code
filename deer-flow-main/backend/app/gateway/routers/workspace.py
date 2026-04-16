@@ -113,7 +113,7 @@ def _walk(cwd: Path) -> list[dict]:
 
     def _children(parent: Path, rel_prefix: str, depth: int) -> list[dict]:
         nonlocal count
-        if depth > _MAX_DEPTH:
+        if depth >= _MAX_DEPTH:
             return []
         try:
             entries = sorted(parent.iterdir(), key=lambda p: (not p.is_dir(), p.name))
