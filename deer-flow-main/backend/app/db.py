@@ -14,13 +14,22 @@ from __future__ import annotations
 
 import json as _json
 import os
+import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
+
+
+class UserExistsError(Exception):
+    """Raised by :meth:`Db.insert_user` when ``email`` collides with an
+    existing row. Chosen over HTTPException so the auth router and admin
+    CLI can translate it differently (router → 401 generic, CLI → exit 1
+    with a readable message)."""
 
 
 def _sqlite_url(data_dir: Path) -> str:
@@ -86,6 +95,40 @@ class UploadRow:
     size: int
     content_type: str | None
     created_at: datetime | str | None
+
+
+@dataclass
+class UserRow:
+    """One row of ``users`` (Task 5.2 auth).
+
+    ``password_hash`` is argon2-cffi PHC output. ``is_admin`` is the
+    single privilege bit we carry today; finer-grained roles are YAGNI
+    for a single-tenant homelab.
+    """
+
+    id: str
+    email: str
+    password_hash: str
+    created_at: datetime | str | None
+    is_admin: bool
+
+
+@dataclass
+class AuthSessionRow:
+    """One row of ``auth_sessions`` (Task 5.2 auth).
+
+    ``id`` is the opaque token that lives in the ``harmony_session``
+    cookie. All timestamp fields may come back as ISO strings from
+    SQLite; consumers should accept both.
+    """
+
+    id: str
+    user_id: str
+    created_at: datetime | str | None
+    expires_at: datetime | str | None
+    last_seen_at: datetime | str | None
+    user_agent: str | None
+    ip: str | None
 
 
 @dataclass
@@ -422,3 +465,185 @@ class Db:
                 text("DELETE FROM uploads WHERE id = :id"),
                 {"id": upload_id},
             )
+
+    # ------------------------------------------------------------------
+    # Users + auth sessions (M5 Task 5.2)
+    # ------------------------------------------------------------------
+    def insert_user(
+        self,
+        *,
+        email: str,
+        password_hash: str,
+        is_admin: bool = False,
+    ) -> str:
+        """Insert a ``users`` row and return the generated id.
+
+        Emails are normalized to lowercase (single-tenant — case-folding
+        avoids duplicate "Admin@x" / "admin@x" rows). Raises
+        :class:`UserExistsError` on UNIQUE collision.
+        """
+        new_id = f"u_{uuid.uuid4().hex[:12]}"
+        normalized = email.strip().lower()
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO users (id, email, password_hash, is_admin)
+                        VALUES (:id, :email, :ph, :admin)
+                        """
+                    ),
+                    {
+                        "id": new_id,
+                        "email": normalized,
+                        "ph": password_hash,
+                        "admin": is_admin,
+                    },
+                )
+        except IntegrityError as exc:
+            raise UserExistsError(normalized) from exc
+        return new_id
+
+    def get_user_by_email(self, email: str) -> UserRow | None:
+        sql = "SELECT id, email, password_hash, created_at, is_admin FROM users WHERE email = :email"
+        with self.engine.connect() as conn:
+            row = conn.execute(text(sql), {"email": email.strip().lower()}).mappings().first()
+        if row is None:
+            return None
+        return UserRow(**{**dict(row), "is_admin": bool(row["is_admin"])})
+
+    def get_user_by_id(self, user_id: str) -> UserRow | None:
+        sql = "SELECT id, email, password_hash, created_at, is_admin FROM users WHERE id = :id"
+        with self.engine.connect() as conn:
+            row = conn.execute(text(sql), {"id": user_id}).mappings().first()
+        if row is None:
+            return None
+        return UserRow(**{**dict(row), "is_admin": bool(row["is_admin"])})
+
+    def list_users(self) -> list[UserRow]:
+        sql = "SELECT id, email, password_hash, created_at, is_admin FROM users ORDER BY email"
+        with self.engine.connect() as conn:
+            rows = conn.execute(text(sql)).mappings().all()
+        return [UserRow(**{**dict(r), "is_admin": bool(r["is_admin"])}) for r in rows]
+
+    def delete_user(self, user_id: str) -> None:
+        """Delete user + all their auth_sessions (FK ON DELETE CASCADE
+        does this on real DBs; SQLite needs ``PRAGMA foreign_keys=ON``,
+        which we don't rely on, so we cascade explicitly)."""
+        with self.engine.begin() as conn:
+            conn.execute(text("DELETE FROM auth_sessions WHERE user_id = :uid"), {"uid": user_id})
+            conn.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
+
+    def update_user_password(self, user_id: str, *, password_hash: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("UPDATE users SET password_hash = :ph WHERE id = :id"),
+                {"ph": password_hash, "id": user_id},
+            )
+
+    # --- auth_sessions ---
+
+    def create_auth_session(
+        self,
+        *,
+        user_id: str,
+        ttl_seconds: int,
+        user_agent: str | None,
+        ip: str | None,
+    ) -> AuthSessionRow:
+        """Insert a fresh session row and return it fully populated.
+
+        ``ttl_seconds`` may be negative for tests that want a pre-expired
+        row. The token is 32 hex chars (128 bits) — guessing is
+        infeasible, so we do not hash it at rest.
+        """
+        token = secrets.token_hex(16)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        expires = now + timedelta(seconds=ttl_seconds)
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO auth_sessions (id, user_id, created_at, expires_at,
+                        last_seen_at, user_agent, ip)
+                    VALUES (:id, :uid, :now, :exp, :now, :ua, :ip)
+                    """
+                ),
+                {
+                    "id": token,
+                    "uid": user_id,
+                    "now": now,
+                    "exp": expires,
+                    "ua": user_agent,
+                    "ip": ip,
+                },
+            )
+        return AuthSessionRow(
+            id=token,
+            user_id=user_id,
+            created_at=now,
+            expires_at=expires,
+            last_seen_at=now,
+            user_agent=user_agent,
+            ip=ip,
+        )
+
+    def get_auth_session(self, token: str) -> AuthSessionRow | None:
+        """Return the session if present AND not expired, else None.
+
+        Does NOT delete the expired row — :meth:`sweep_expired_sessions`
+        handles that on a coarser cadence so normal reads stay cheap.
+        """
+        if not token:
+            return None
+        sql = (
+            "SELECT id, user_id, created_at, expires_at, last_seen_at, user_agent, ip "
+            "FROM auth_sessions WHERE id = :id"
+        )
+        with self.engine.connect() as conn:
+            row = conn.execute(text(sql), {"id": token}).mappings().first()
+        if row is None:
+            return None
+        # expires_at comes back either as datetime or ISO string depending on
+        # how it was inserted. Normalize and compare against 'now' (naive UTC).
+        expires_raw = row["expires_at"]
+        if isinstance(expires_raw, str):
+            try:
+                expires_dt = datetime.fromisoformat(expires_raw.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        else:
+            expires_dt = expires_raw
+        if expires_dt.tzinfo is not None:
+            expires_dt = expires_dt.astimezone(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if expires_dt <= now:
+            return None
+        return AuthSessionRow(**dict(row))
+
+    def touch_auth_session(self, token: str, *, now: datetime | None = None) -> None:
+        """Update ``last_seen_at``. ``now`` is parameterized for tests
+        that need to force a later timestamp without sleeping."""
+        if now is None:
+            now = datetime.now(timezone.utc)
+        if now.tzinfo is not None:
+            now = now.astimezone(timezone.utc).replace(tzinfo=None)
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("UPDATE auth_sessions SET last_seen_at = :now WHERE id = :id"),
+                {"now": now, "id": token},
+            )
+
+    def delete_auth_session(self, token: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(text("DELETE FROM auth_sessions WHERE id = :id"), {"id": token})
+
+    def sweep_expired_sessions(self) -> int:
+        """Delete all expired session rows. Returns the number removed."""
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                text("DELETE FROM auth_sessions WHERE expires_at <= :now"),
+                {"now": now},
+            )
+        return result.rowcount or 0
