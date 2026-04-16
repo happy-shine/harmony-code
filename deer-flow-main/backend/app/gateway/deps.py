@@ -8,8 +8,10 @@ Initialization is handled directly in ``app.py`` via :class:`AsyncExitStack`.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 
@@ -92,3 +94,38 @@ def get_db():
     from app.db import Db, get_engine
 
     return Db(get_engine())
+
+
+# ---------------------------------------------------------------------------
+# Thread/session filesystem helpers. Shared by routers that touch the
+# per-thread workspace directory (messages, workspace, cancel). Resolve
+# ``HARMONY_DATA_DIR`` fresh on every call so tests can monkeypatch it.
+# ---------------------------------------------------------------------------
+
+
+def data_dir() -> Path:
+    """Root data directory (``$HARMONY_DATA_DIR`` or ``.harmony-data``)."""
+    return Path(os.environ.get("HARMONY_DATA_DIR", ".harmony-data"))
+
+
+def session_store():
+    """Fresh ``SessionStore`` rooted at ``data_dir()/sessions.db``.
+
+    Creates the parent directory if needed (sqlite3 does not create
+    missing dirs) and ensures the schema exists. Safe to call from
+    every request.
+    """
+    from app.cc_adapter.session_store import SessionStore
+
+    p = data_dir() / "sessions.db"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    s = SessionStore(str(p))
+    s.ensure_schema()
+    return s
+
+
+def thread_cwd(thread_id: str) -> Path:
+    """Per-thread CC working directory. Authoritative ``row.cwd`` for new
+    threads; existing threads may point elsewhere if created before this
+    layout existed — callers must prefer the stored ``row.cwd``."""
+    return data_dir() / "threads" / thread_id / "user-data" / "workspace"

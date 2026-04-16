@@ -10,8 +10,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Request
@@ -20,9 +18,14 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.cc_adapter.adapter import CCAdapter
 from app.cc_adapter.compose import compose_mcp_config, compose_skills_dir
-from app.cc_adapter.session_store import SessionStore
 from app.cc_adapter.types import SpawnConfig
-from app.gateway.deps import current_user_id, get_db
+from app.gateway.deps import (
+    current_user_id,
+    data_dir as _data_dir,
+    get_db,
+    session_store as _store,
+    thread_cwd as _thread_cwd,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -33,22 +36,6 @@ router = APIRouter(prefix="/api")
 class SendMessageBody(BaseModel):
     content: str
     attachments: list[str] = []
-
-
-def _data_dir() -> Path:
-    return Path(os.environ.get("HARMONY_DATA_DIR", ".harmony-data"))
-
-
-def _store() -> SessionStore:
-    p = _data_dir() / "sessions.db"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    s = SessionStore(str(p))
-    s.ensure_schema()
-    return s
-
-
-def _thread_cwd(thread_id: str) -> Path:
-    return _data_dir() / "threads" / thread_id / "user-data" / "workspace"
 
 
 _inflight: set[str] = set()
