@@ -24,6 +24,7 @@ Authorization: M3 stub — ``user_id`` is the ``"u_default"`` returned by
 today it's recorded on insert but we filter by ``thread_id`` alone (the
 thread itself is the access-control boundary until M5 wires real auth).
 """
+
 from __future__ import annotations
 
 import logging
@@ -35,7 +36,6 @@ from pydantic import BaseModel
 
 from app.db import UploadRow
 from app.gateway.deps import current_user_id, data_dir, get_db, session_store
-
 
 logger = logging.getLogger(__name__)
 

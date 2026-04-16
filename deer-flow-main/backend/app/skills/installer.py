@@ -8,6 +8,7 @@ Keeping filesystem work out of the router makes the installer trivially
 unit-testable against ``tmp_path`` and keeps the DB ↔ disk contract narrow:
 the installer owns the directory, the DB row stores its path.
 """
+
 from __future__ import annotations
 
 import logging
@@ -33,9 +34,7 @@ def _new_skill_id() -> str:
 def _validate_skill_dir(skill_dir: Path) -> None:
     """Every skill must have a top-level ``SKILL.md``. Reject otherwise."""
     if not (skill_dir / "SKILL.md").is_file():
-        raise SkillInstallError(
-            f"Skill at {skill_dir} is missing SKILL.md at the top level"
-        )
+        raise SkillInstallError(f"Skill at {skill_dir} is missing SKILL.md at the top level")
 
 
 def _redact_git_stderr(stderr: str, url: str) -> str:
@@ -91,7 +90,7 @@ def _zip_safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
     for member in zf.infolist():
         name = member.filename
         if strip_root and name.startswith(root_prefix):
-            name = name[len(root_prefix):]
+            name = name[len(root_prefix) :]
         if not name:
             continue
         # Reject symlink entries explicitly. A zip stores a symlink with
@@ -103,17 +102,13 @@ def _zip_safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
         # at ``/etc/passwd``. Guard the invariant here.
         file_mode = member.external_attr >> 16
         if file_mode & 0o170000 == 0o120000:  # S_IFLNK
-            raise SkillInstallError(
-                f"Zip entry {member.filename!r} is a symlink; not supported"
-            )
+            raise SkillInstallError(f"Zip entry {member.filename!r} is a symlink; not supported")
         target = (dest / name).resolve()
         # Final belt-and-braces check: resolved target must live under dest.
         try:
             target.relative_to(dest)
         except ValueError:
-            raise SkillInstallError(
-                f"Zip entry {member.filename!r} escapes destination"
-            )
+            raise SkillInstallError(f"Zip entry {member.filename!r} escapes destination")
         if member.is_dir():
             target.mkdir(parents=True, exist_ok=True)
         else:
@@ -122,9 +117,7 @@ def _zip_safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
                 shutil.copyfileobj(src, dst)
 
 
-def install_from_zip(
-    *, zip_stream: BinaryIO, data_dir: Path
-) -> tuple[str, Path]:
+def install_from_zip(*, zip_stream: BinaryIO, data_dir: Path) -> tuple[str, Path]:
     """Extract a zip into ``skills_store/{id}/`` and validate ``SKILL.md``.
 
     The caller is responsible for the DB insert; this function is
@@ -144,9 +137,7 @@ def install_from_zip(
     return skill_id, skill_dir
 
 
-def install_from_git(
-    *, url: str, data_dir: Path, timeout: int = 60
-) -> tuple[str, Path]:
+def install_from_git(*, url: str, data_dir: Path, timeout: int = 60) -> tuple[str, Path]:
     """Shallow-clone a git repo into ``skills_store/{id}/``.
 
     Uses ``git clone --depth 1 -- <url> <dest>``. The ``--`` terminator
@@ -155,11 +146,7 @@ def install_from_git(
     entirely. ``timeout`` bounds a hung clone so the gateway can never
     block indefinitely on a slow remote.
     """
-    if not (
-        url.startswith("https://")
-        or url.startswith("http://")
-        or url.startswith("git@")
-    ):
+    if not (url.startswith("https://") or url.startswith("http://") or url.startswith("git@")):
         raise SkillInstallError(f"Unsupported git URL scheme: {url!r}")
     skill_id = _new_skill_id()
     skill_dir = data_dir / "skills_store" / skill_id
@@ -180,9 +167,7 @@ def install_from_git(
             # the scrubbed version so credentials in the URL don't leak.
             logger.debug("git clone stderr (unredacted): %s", result.stderr)
             sanitized = _redact_git_stderr(result.stderr.strip(), url)[-500:]
-            raise SkillInstallError(
-                f"git clone failed (exit {result.returncode}): {sanitized}"
-            )
+            raise SkillInstallError(f"git clone failed (exit {result.returncode}): {sanitized}")
         _validate_skill_dir(skill_dir)
     except Exception:
         shutil.rmtree(skill_dir, ignore_errors=True)
@@ -203,10 +188,8 @@ def parse_skill_name(skill_dir: Path) -> str:
         for line in m.group(1).splitlines():
             line = line.strip()
             if line.startswith("name:"):
-                val = line[len("name:"):].strip()
-                if (val.startswith('"') and val.endswith('"')) or (
-                    val.startswith("'") and val.endswith("'")
-                ):
+                val = line[len("name:") :].strip()
+                if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
                     val = val[1:-1]
                 if val:
                     return val

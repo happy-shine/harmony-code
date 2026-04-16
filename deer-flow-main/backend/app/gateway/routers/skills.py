@@ -18,6 +18,7 @@ invalidate.
 M3 scope: ``user_id`` is stubbed to ``"u_default"`` via
 :func:`app.gateway.deps.current_user_id`; M5 wires real auth.
 """
+
 from __future__ import annotations
 
 import logging
@@ -38,7 +39,6 @@ from app.skills.installer import (
     parse_skill_name,
     uninstall,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -72,16 +72,11 @@ class SkillPatch(BaseModel):
 class GitInstallBody(BaseModel):
     url: str = Field(
         ...,
-        description=(
-            "HTTPS or git@ URL of a repository whose root contains SKILL.md"
-        ),
+        description=("HTTPS or git@ URL of a repository whose root contains SKILL.md"),
     )
     name: str | None = Field(
         None,
-        description=(
-            "Optional override for the skill name (defaults to "
-            "SKILL.md front-matter)"
-        ),
+        description=("Optional override for the skill name (defaults to SKILL.md front-matter)"),
     )
 
 
@@ -101,10 +96,7 @@ def _row_to_out(r: SkillRow) -> SkillOut:
 
 @router.get("", response_model=list[SkillOut])
 def list_skills(user_id: str = Depends(current_user_id)) -> list[SkillOut]:
-    return [
-        _row_to_out(r)
-        for r in get_db().list_skills_for_user(user_id=user_id)
-    ]
+    return [_row_to_out(r) for r in get_db().list_skills_for_user(user_id=user_id)]
 
 
 @router.post(
@@ -125,18 +117,14 @@ async def upload_skill(
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(400, "file must be a .zip")
     try:
-        _skill_id, skill_dir = install_from_zip(
-            zip_stream=file.file, data_dir=_data_dir()
-        )
+        _skill_id, skill_dir = install_from_zip(zip_stream=file.file, data_dir=_data_dir())
     except SkillInstallError as e:
         raise HTTPException(400, str(e))
     finally:
         file.file.close()
     name = parse_skill_name(skill_dir)
     db = get_db()
-    new_id = db.insert_skill(
-        user_id=user_id, name=name, source="upload", path=str(skill_dir)
-    )
+    new_id = db.insert_skill(user_id=user_id, name=name, source="upload", path=str(skill_dir))
     row = db.get_skill(new_id)
     if row is None:
         # Insert just succeeded; this would be a concurrent delete racing us.
@@ -149,25 +137,19 @@ async def upload_skill(
     response_model=SkillOut,
     status_code=status.HTTP_201_CREATED,
 )
-def git_install_skill(
-    body: GitInstallBody, user_id: str = Depends(current_user_id)
-) -> SkillOut:
+def git_install_skill(body: GitInstallBody, user_id: str = Depends(current_user_id)) -> SkillOut:
     """Install a skill by shallow-cloning ``body.url`` into ``skills_store``.
 
     Validation happens post-clone (``SKILL.md`` must exist at repo root);
     on any failure the partially-cloned directory is cleaned up.
     """
     try:
-        _skill_id, skill_dir = install_from_git(
-            url=body.url, data_dir=_data_dir()
-        )
+        _skill_id, skill_dir = install_from_git(url=body.url, data_dir=_data_dir())
     except SkillInstallError as e:
         raise HTTPException(400, str(e))
     name = body.name or parse_skill_name(skill_dir)
     db = get_db()
-    new_id = db.insert_skill(
-        user_id=user_id, name=name, source="git", path=str(skill_dir)
-    )
+    new_id = db.insert_skill(user_id=user_id, name=name, source="git", path=str(skill_dir))
     row = db.get_skill(new_id)
     if row is None:
         raise HTTPException(500, "inserted row not found")
@@ -203,9 +185,7 @@ def update_skill(
 
 
 @router.delete("/{skill_id}")
-def delete_skill(
-    skill_id: str, user_id: str = Depends(current_user_id)
-) -> dict[str, Any]:
+def delete_skill(skill_id: str, user_id: str = Depends(current_user_id)) -> dict[str, Any]:
     """Delete the DB row first (source of truth), then clean up the filesystem.
 
     If filesystem cleanup fails, we leak a directory in ``skills_store/``

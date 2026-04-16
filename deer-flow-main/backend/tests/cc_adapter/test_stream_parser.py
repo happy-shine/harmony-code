@@ -57,18 +57,22 @@ def test_parser_does_not_overwrite_session_id_with_hook_frame():
     """Pre-init hook frames 的 session_id 是 per-invocation, 不是会话 id.
     StreamParser.session_id 必须只在 `type==system && subtype==init` 时设置。"""
     parser = StreamParser()
-    hook_line = json.dumps({
-        "type": "system",
-        "subtype": "hook_started",
-        "session_id": "hook-invocation-xyz",
-    }).encode()
+    hook_line = json.dumps(
+        {
+            "type": "system",
+            "subtype": "hook_started",
+            "session_id": "hook-invocation-xyz",
+        }
+    ).encode()
     parser.feed_line(hook_line + b"\n")
     assert parser.session_id is None
-    init_line = json.dumps({
-        "type": "system",
-        "subtype": "init",
-        "session_id": "conversation-abc",
-    }).encode()
+    init_line = json.dumps(
+        {
+            "type": "system",
+            "subtype": "init",
+            "session_id": "conversation-abc",
+        }
+    ).encode()
     parser.feed_line(init_line + b"\n")
     assert parser.session_id == "conversation-abc"
 

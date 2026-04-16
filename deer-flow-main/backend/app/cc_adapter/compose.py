@@ -11,6 +11,7 @@ On each claude-code CLI spawn the gateway needs two derived artifacts:
 Both live next to the per-thread workspace and are recomposed on every
 spawn so that DB edits take effect without a long-lived cache.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,9 +22,7 @@ from pathlib import Path
 from app.db import Db
 
 
-def compose_mcp_config(
-    *, db: Db, user_id: str, thread_id: str, tmp_root: Path
-) -> Path:
+def compose_mcp_config(*, db: Db, user_id: str, thread_id: str, tmp_root: Path) -> Path:
     """Write a ``{"mcpServers": {...}}`` JSON file for this spawn.
 
     Queries enabled MCP rows for ``user_id`` (plus global rows where
@@ -42,9 +41,7 @@ def compose_mcp_config(
                 entry["args"] = json.loads(r.args_json)
         else:
             if r.url is None:
-                raise ValueError(
-                    f"{r.transport} MCP {r.name!r} missing url"
-                )
+                raise ValueError(f"{r.transport} MCP {r.name!r} missing url")
             entry["url"] = r.url
             if r.headers_json:
                 entry["headers"] = json.loads(r.headers_json)
@@ -61,9 +58,7 @@ def compose_mcp_config(
     return out_path
 
 
-def compose_skills_dir(
-    *, db: Db, user_id: str, skills_dir: Path
-) -> None:
+def compose_skills_dir(*, db: Db, user_id: str, skills_dir: Path) -> None:
     """(Re)create ``skills_dir`` and symlink each enabled skill into it.
 
     Any existing directory at ``skills_dir`` is removed first so stale

@@ -6,18 +6,18 @@ and confirm that (a) ``mcp_config_path`` points at a JSON file listing the
 user's enabled MCP servers and (b) the per-thread ``.claude/skills`` directory
 is populated with symlinks to each enabled skill.
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 
+from alembic import command
 from app.db import Db, get_engine
-
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -183,9 +183,7 @@ def test_inflight_released_when_compose_fails(migrated_data_dir, monkeypatch):
     assert tid not in messages._inflight, "inflight leaked after compose failure"
 
 
-def test_send_message_passes_user_default_model_to_spawn(
-    migrated_data_dir, monkeypatch
-):
+def test_send_message_passes_user_default_model_to_spawn(migrated_data_dir, monkeypatch):
     """Task 3.6 wiring: user_prefs.default_model flows into SpawnConfig.model
     and through CCAdapter.build_cmd as ``--model <id>``.
 
@@ -206,9 +204,7 @@ def test_send_message_passes_user_default_model_to_spawn(
     client = TestClient(app)
     tid = client.post("/api/threads", json={}).json()["id"]
 
-    with client.stream(
-        "POST", f"/api/threads/{tid}/messages", json={"content": "hi"}
-    ) as resp:
+    with client.stream("POST", f"/api/threads/{tid}/messages", json={"content": "hi"}) as resp:
         assert resp.status_code == 200
         for _ in resp.iter_text():
             pass
@@ -223,9 +219,7 @@ def test_send_message_passes_user_default_model_to_spawn(
     assert cmd[cmd.index("--model") + 1] == "opus"
 
 
-def test_send_message_no_model_flag_when_pref_unset(
-    migrated_data_dir, monkeypatch
-):
+def test_send_message_no_model_flag_when_pref_unset(migrated_data_dir, monkeypatch):
     """If user_prefs has no row (or default_model IS NULL), build_cmd
     must not emit ``--model`` — CC then uses its built-in default."""
     captured = _install_fake_adapter(monkeypatch)
@@ -236,9 +230,7 @@ def test_send_message_no_model_flag_when_pref_unset(
     client = TestClient(app)
     tid = client.post("/api/threads", json={}).json()["id"]
 
-    with client.stream(
-        "POST", f"/api/threads/{tid}/messages", json={"content": "hi"}
-    ) as resp:
+    with client.stream("POST", f"/api/threads/{tid}/messages", json={"content": "hi"}) as resp:
         assert resp.status_code == 200
         for _ in resp.iter_text():
             pass
@@ -272,9 +264,7 @@ def test_send_message_skips_disabled_rows(migrated_data_dir, monkeypatch):
     disabled_skill = migrated_data_dir / "skills_src" / "disabled"
     disabled_skill.mkdir(parents=True)
     (disabled_skill / "SKILL.md").write_text("---\nname: disabled\n---")
-    db.insert_skill(
-        user_id="u_default", name="enabled", source="upload", path=str(enabled_skill)
-    )
+    db.insert_skill(user_id="u_default", name="enabled", source="upload", path=str(enabled_skill))
     db.insert_skill(
         user_id="u_default",
         name="disabled",
@@ -290,9 +280,7 @@ def test_send_message_skips_disabled_rows(migrated_data_dir, monkeypatch):
     client = TestClient(app)
     tid = client.post("/api/threads", json={}).json()["id"]
 
-    with client.stream(
-        "POST", f"/api/threads/{tid}/messages", json={"content": "hi"}
-    ) as resp:
+    with client.stream("POST", f"/api/threads/{tid}/messages", json={"content": "hi"}) as resp:
         assert resp.status_code == 200
         for _ in resp.iter_text():
             pass

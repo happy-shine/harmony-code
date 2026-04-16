@@ -10,8 +10,10 @@ No UNIQUE (thread_id, filename) constraint — users can re-upload under
 the same name (new row; file on disk overwritten). ``user_id`` is
 forward-compat for M5 auth; today the router always writes NULL.
 """
-from alembic import op
+
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "002"
 down_revision = "001"

@@ -1,4 +1,5 @@
 """Parse CC stdout jsonl line-by-line, extract session_id, pass through everything else."""
+
 import json
 
 
@@ -21,8 +22,6 @@ class StreamParser:
             event = json.loads(line)
         except json.JSONDecodeError:
             return None, raw_line
-        if (self.session_id is None
-                and event.get("type") == "system"
-                and event.get("subtype") == "init"):
+        if self.session_id is None and event.get("type") == "system" and event.get("subtype") == "init":
             self.session_id = event.get("session_id")
         return event, raw_line

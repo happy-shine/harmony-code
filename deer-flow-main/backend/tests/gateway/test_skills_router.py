@@ -10,6 +10,7 @@ Follows the Task 3.4 fixture pattern: alembic ``Config()`` WITHOUT the
 ini path so ``logging.config.fileConfig`` can't disable pre-existing
 loggers and break caplog-based tests elsewhere in the suite.
 """
+
 from __future__ import annotations
 
 import io
@@ -18,12 +19,11 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 
+from alembic import command
 from app.db import Db, get_engine
-
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -159,9 +159,7 @@ def test_global_row_visible_in_list(client):
     c, tmp = client
     # Direct DB insert with user_id=None to simulate a global row.
     db = Db(get_engine(tmp))
-    db.insert_skill(
-        user_id=None, name="global_sk", source="upload", path="/does/not/matter"
-    )
+    db.insert_skill(user_id=None, name="global_sk", source="upload", path="/does/not/matter")
     rows = c.get("/api/skills").json()
     names = [r["name"] for r in rows]
     assert "global_sk" in names
@@ -310,12 +308,8 @@ def test_patch_rename_collision_returns_409(client):
     d2 = tmp / "skills_store" / "b"
     d2.mkdir(parents=True)
     (d2 / "SKILL.md").write_text("---\nname: second\n---")
-    id1 = db.insert_skill(
-        user_id="u_default", name="first", source="upload", path=str(d1)
-    )
-    db.insert_skill(
-        user_id="u_default", name="second", source="upload", path=str(d2)
-    )
+    id1 = db.insert_skill(user_id="u_default", name="first", source="upload", path=str(d1))
+    db.insert_skill(user_id="u_default", name="second", source="upload", path=str(d2))
 
     # Rename "first" → "second" (already taken by the same user).
     r = c.patch(f"/api/skills/{id1}", json={"name": "second"})
@@ -338,9 +332,7 @@ def test_patch_nonexistent_is_404(client):
 def test_patch_other_users_row_is_403(client):
     c, tmp = client
     db = Db(get_engine(tmp))
-    other_id = db.insert_skill(
-        user_id="u_other", name="theirs", source="upload", path="/nowhere"
-    )
+    other_id = db.insert_skill(user_id="u_other", name="theirs", source="upload", path="/nowhere")
     r = c.patch(f"/api/skills/{other_id}", json={"enabled": False})
     assert r.status_code == 403
 
@@ -348,9 +340,7 @@ def test_patch_other_users_row_is_403(client):
 def test_patch_global_row_is_403(client):
     c, tmp = client
     db = Db(get_engine(tmp))
-    gid = db.insert_skill(
-        user_id=None, name="g", source="upload", path="/nowhere"
-    )
+    gid = db.insert_skill(user_id=None, name="g", source="upload", path="/nowhere")
     r = c.patch(f"/api/skills/{gid}", json={"name": "hacked"})
     assert r.status_code == 403
 
@@ -388,9 +378,7 @@ def test_delete_nonexistent_is_404(client):
 def test_delete_global_row_is_403(client):
     c, tmp = client
     db = Db(get_engine(tmp))
-    gid = db.insert_skill(
-        user_id=None, name="g", source="upload", path="/nowhere"
-    )
+    gid = db.insert_skill(user_id=None, name="g", source="upload", path="/nowhere")
     r = c.delete(f"/api/skills/{gid}")
     assert r.status_code == 403
     rows = c.get("/api/skills").json()
@@ -400,9 +388,7 @@ def test_delete_global_row_is_403(client):
 def test_delete_other_users_row_is_403(client):
     c, tmp = client
     db = Db(get_engine(tmp))
-    other_id = db.insert_skill(
-        user_id="u_other", name="theirs", source="upload", path="/nowhere"
-    )
+    other_id = db.insert_skill(user_id="u_other", name="theirs", source="upload", path="/nowhere")
     r = c.delete(f"/api/skills/{other_id}")
     assert r.status_code == 403
 

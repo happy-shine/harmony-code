@@ -1,4 +1,5 @@
 """CC event TypedDicts. Only fields we actually consume."""
+
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypedDict
 

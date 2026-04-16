@@ -1,5 +1,6 @@
 """Minimal SQLite-backed store for thread_id → (session_id, cwd). M1 scope.
 M5 will replace with a consolidated thread table."""
+
 from __future__ import annotations
 
 import sqlite3

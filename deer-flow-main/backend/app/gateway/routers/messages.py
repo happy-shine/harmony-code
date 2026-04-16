@@ -5,12 +5,13 @@ before starting the server — :func:`send_message` composes an MCP config and
 skills directory from ``harmony.db`` on every spawn and will fail if the
 schema is missing.
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -21,12 +22,17 @@ from app.cc_adapter.compose import compose_mcp_config, compose_skills_dir
 from app.cc_adapter.types import SpawnConfig
 from app.gateway.deps import (
     current_user_id,
-    data_dir as _data_dir,
     get_db,
+)
+from app.gateway.deps import (
+    data_dir as _data_dir,
+)
+from app.gateway.deps import (
     session_store as _store,
+)
+from app.gateway.deps import (
     thread_cwd as _thread_cwd,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +51,7 @@ _inflight_lock = asyncio.Lock()
 @router.post("/threads")
 def create_thread() -> dict:
     from uuid import uuid4
+
     tid = f"t_{uuid4().hex[:12]}"
     cwd = _thread_cwd(tid)
     cwd.mkdir(parents=True, exist_ok=True)
@@ -84,12 +91,8 @@ async def send_message(tid: str, body: SendMessageBody, request: Request):
         tmp_root.mkdir(parents=True, exist_ok=True)
         thread_root = data_dir / "threads" / tid / "user-data"
         db = get_db()
-        mcp_path = compose_mcp_config(
-            db=db, user_id=user_id, thread_id=tid, tmp_root=tmp_root
-        )
-        compose_skills_dir(
-            db=db, user_id=user_id, skills_dir=thread_root / ".claude" / "skills"
-        )
+        mcp_path = compose_mcp_config(db=db, user_id=user_id, thread_id=tid, tmp_root=tmp_root)
+        compose_skills_dir(db=db, user_id=user_id, skills_dir=thread_root / ".claude" / "skills")
 
         # User's default_model pref → SpawnConfig.model → --model in argv
         # (adapter.build_cmd appends it iff cfg.model is truthy). Missing row
@@ -119,9 +122,7 @@ async def send_message(tid: str, body: SendMessageBody, request: Request):
                     await gen.aclose()
                     break
                 # capture session_id on first init
-                if (ev.get("type") == "system"
-                        and ev.get("subtype") == "init"
-                        and row.session_id is None):
+                if ev.get("type") == "system" and ev.get("subtype") == "init" and row.session_id is None:
                     sid = ev.get("session_id")
                     if sid:
                         store.set_session_id(tid, sid)

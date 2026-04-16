@@ -1,4 +1,5 @@
 """Shared fixtures for gateway tests that need a real HTTP server."""
+
 from __future__ import annotations
 
 import os
@@ -12,8 +13,9 @@ from pathlib import Path
 
 import httpx
 import pytest
-from alembic import command
 from alembic.config import Config
+
+from alembic import command
 
 
 def _run_harmony_migrations(data_dir: Path) -> None:
@@ -74,13 +76,11 @@ def gateway_server(tmp_path):
     backend_root = Path(__file__).resolve().parents[2]
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn",
-         "app.gateway.harmony_app:app",
-         "--host", "127.0.0.1", "--port", str(port),
-         "--log-level", "warning"],
+        [sys.executable, "-m", "uvicorn", "app.gateway.harmony_app:app", "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"],
         cwd=backend_root,
         env={**env, "PYTHONPATH": str(backend_root)},
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
     # Wait for /docs (FastAPI default) to respond

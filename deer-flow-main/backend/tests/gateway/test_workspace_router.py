@@ -5,16 +5,17 @@ Covers the file-tree + download endpoints that expose the CC-managed
 the frontend. Security-critical — path-escape, symlink, and null-byte
 tests must fail loudly before any production deploy.
 """
+
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 
+from alembic import command
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 

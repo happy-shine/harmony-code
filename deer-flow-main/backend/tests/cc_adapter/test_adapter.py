@@ -1,11 +1,10 @@
 import asyncio
-import json
 import shutil
+
 import pytest
 
 from app.cc_adapter.adapter import CCAdapter
 from app.cc_adapter.types import SpawnConfig
-
 
 pytestmark = pytest.mark.skipif(shutil.which("claude") is None, reason="claude CLI not installed")
 
@@ -76,8 +75,7 @@ async def test_adapter_resume_continues_session(tmp_path):
     assert sid
 
     # turn 2 with --resume
-    cfg2 = SpawnConfig(cwd=str(cwd), user_prompt="what number did i tell you?", resume_session_id=sid,
-                      permission_mode="bypassPermissions")
+    cfg2 = SpawnConfig(cwd=str(cwd), user_prompt="what number did i tell you?", resume_session_id=sid, permission_mode="bypassPermissions")
     gen2 = adapter.run(cfg2)
     try:
         frames2 = await _collect_until_result(gen2)

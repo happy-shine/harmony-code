@@ -6,19 +6,19 @@ same pattern as ``test_mcp_router.py`` and ``test_skills_router.py`` —
 construct :class:`alembic.config.Config` **without** the ini path to
 avoid ``logging.config.fileConfig`` nuking caplog in other tests.
 """
+
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 
+from alembic import command
 from app.db import Db, get_engine
 from app.model_catalog import MODELS
-
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 

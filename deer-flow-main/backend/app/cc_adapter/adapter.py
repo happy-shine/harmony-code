@@ -1,8 +1,9 @@
 """CCAdapter: compose CLI args, spawn CC, yield jsonl events."""
+
 from __future__ import annotations
 
 import os
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from .lifecycle import CCProcess
 from .stream_parser import StreamParser
@@ -17,10 +18,7 @@ class CCAdapter:
     ENV_CLAUDE_PREFIX = "CLAUDE_CODE_"
 
     def build_cmd(self, cfg: SpawnConfig) -> list[str]:
-        cmd = ["claude", "-p",
-               "--output-format", "stream-json",
-               "--verbose",
-               "--permission-mode", cfg.permission_mode]
+        cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", cfg.permission_mode]
         if cfg.resume_session_id:
             cmd += ["--resume", cfg.resume_session_id]
         if cfg.mcp_config_path:

@@ -4,6 +4,7 @@ Covers happy-path zip extraction (flat + single-root stripped),
 zip-slip rejection, missing ``SKILL.md`` cleanup, the
 ``parse_skill_name`` YAML heuristics, and ``uninstall`` idempotency.
 """
+
 from __future__ import annotations
 
 import io
@@ -36,14 +37,10 @@ def _make_zip(tree: dict[str, bytes], root: str | None = None) -> io.BytesIO:
 
 def test_install_from_zip_flat_structure(tmp_path):
     buf = _make_zip({"SKILL.md": b"---\nname: myskill\n---\nbody"})
-    skill_id, skill_dir = install_from_zip(
-        zip_stream=buf, data_dir=tmp_path
-    )
+    skill_id, skill_dir = install_from_zip(zip_stream=buf, data_dir=tmp_path)
     assert skill_id.startswith("sk_")
     assert skill_dir == tmp_path / "skills_store" / skill_id
-    assert (skill_dir / "SKILL.md").read_text().startswith(
-        "---\nname: myskill"
-    )
+    assert (skill_dir / "SKILL.md").read_text().startswith("---\nname: myskill")
 
 
 def test_install_from_zip_single_root_stripped(tmp_path):
@@ -51,9 +48,7 @@ def test_install_from_zip_single_root_stripped(tmp_path):
         {"SKILL.md": b"---\nname: wrapped\n---\n", "sub/file.txt": b"x"},
         root="pkg-main",
     )
-    skill_id, skill_dir = install_from_zip(
-        zip_stream=buf, data_dir=tmp_path
-    )
+    skill_id, skill_dir = install_from_zip(zip_stream=buf, data_dir=tmp_path)
     assert (skill_dir / "SKILL.md").exists()
     assert (skill_dir / "sub" / "file.txt").exists()
     # Wrapping directory was stripped; SKILL.md lives at the top level.
@@ -68,9 +63,7 @@ def test_install_from_zip_multi_root_not_stripped(tmp_path):
         zf.writestr("SKILL.md", b"---\nname: twin\n---\n")
         zf.writestr("extras/readme.txt", b"hi")
     buf.seek(0)
-    skill_id, skill_dir = install_from_zip(
-        zip_stream=buf, data_dir=tmp_path
-    )
+    skill_id, skill_dir = install_from_zip(zip_stream=buf, data_dir=tmp_path)
     assert (skill_dir / "SKILL.md").is_file()
     assert (skill_dir / "extras" / "readme.txt").is_file()
 
@@ -169,9 +162,7 @@ def test_install_from_git_clone_failure_cleans_up(tmp_path, monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     with pytest.raises(SkillInstallError, match="git clone failed"):
-        install_from_git(
-            url="https://example/repo.git", data_dir=tmp_path
-        )
+        install_from_git(url="https://example/repo.git", data_dir=tmp_path)
     # Partial dir cleaned up so a retry can land on the same id-space.
     assert not any((tmp_path / "skills_store").glob("sk_*"))
 
@@ -208,19 +199,14 @@ def test_install_from_git_accepts_https_and_ssh(tmp_path, monkeypatch):
     ]
 
 
-def test_install_from_git_redacts_url_credentials_in_error(
-    tmp_path, monkeypatch
-):
+def test_install_from_git_redacts_url_credentials_in_error(tmp_path, monkeypatch):
     """Error message must not echo the URL (which may embed user:password@)."""
     import subprocess
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         class R:
             returncode = 128
-            stderr = (
-                "fatal: could not read from "
-                "https://alice:hunter2@example.com/x.git"
-            )
+            stderr = "fatal: could not read from https://alice:hunter2@example.com/x.git"
             stdout = ""
 
         return R()
@@ -274,9 +260,7 @@ def test_install_from_git_missing_skill_md_cleans_up(tmp_path, monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     with pytest.raises(SkillInstallError, match="SKILL.md"):
-        install_from_git(
-            url="https://host/repo.git", data_dir=tmp_path
-        )
+        install_from_git(url="https://host/repo.git", data_dir=tmp_path)
     assert not any((tmp_path / "skills_store").glob("sk_*"))
 
 

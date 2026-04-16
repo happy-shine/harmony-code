@@ -8,6 +8,7 @@ All fixtures follow the Task 3.3 / 3.4 / 3.5 pattern: construct
 ``alembic.config.Config`` WITHOUT the ini path, so alembic doesn't call
 ``logging.config.fileConfig`` and break caplog elsewhere in the suite.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,12 +17,11 @@ import os
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
 
+from alembic import command
 from app.db import Db, get_engine
-
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -101,10 +101,7 @@ def test_empty_config_is_noop_and_logs_counts(db, tmp_path, caplog):
     assert _count_mcp(db) == 0
     assert _count_skills(db) == 0
     # At least one log line must reference the counts (0 MCP, 0 skills).
-    assert any(
-        ("0" in r.message and ("mcp" in r.message.lower() or "server" in r.message.lower()))
-        for r in caplog.records
-    )
+    assert any(("0" in r.message and ("mcp" in r.message.lower() or "server" in r.message.lower())) for r in caplog.records)
 
 
 # --- 3. Populated file, stdio server --------------------------------------
@@ -339,9 +336,7 @@ def test_custom_config_path_overrides_default_resolution(db, tmp_path):
     custom.write_text(
         json.dumps(
             {
-                "mcpServers": {
-                    "custom": {"type": "stdio", "command": "run-custom"}
-                },
+                "mcpServers": {"custom": {"type": "stdio", "command": "run-custom"}},
                 "skills": {},
             }
         )

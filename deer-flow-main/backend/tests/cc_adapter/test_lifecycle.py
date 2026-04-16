@@ -1,4 +1,5 @@
 import asyncio
+
 import pytest
 
 from app.cc_adapter.lifecycle import CCProcess
@@ -28,6 +29,7 @@ async def test_ccprocess_terminate_kills_long_running(tmp_path):
         cwd=str(tmp_path),
         env={},
     )
+
     # start streaming, then immediately kill
     async def consume():
         async for _ in proc.stream():

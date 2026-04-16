@@ -26,6 +26,7 @@ is set (``app/cc_adapter/adapter.py`` build_cmd) — this module is *not*
 consumed by the adapter directly; it's the source of truth for the
 router's catalog response and for validating user-supplied model ids.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

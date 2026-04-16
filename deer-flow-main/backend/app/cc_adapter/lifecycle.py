@@ -1,10 +1,11 @@
 """Subprocess lifecycle: spawn, stream stdout lines, capture stderr, terminate."""
+
 from __future__ import annotations
 
 import asyncio
 import signal
 from collections import deque
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 
 class CCProcess:
@@ -63,7 +64,7 @@ class CCProcess:
         self._proc.send_signal(signal.SIGTERM)
         try:
             await asyncio.wait_for(self._proc.wait(), timeout=grace_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._proc.kill()
             await self._proc.wait()
 

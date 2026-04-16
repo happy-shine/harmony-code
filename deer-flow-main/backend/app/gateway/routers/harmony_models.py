@@ -22,6 +22,7 @@ which is the M5-scheduled LangGraph-era models router mounted only by
 router under the same ``/api/models`` prefix — the two apps are never
 run in the same process.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -29,7 +30,6 @@ from pydantic import BaseModel
 
 from app.gateway.deps import current_user_id, get_db
 from app.model_catalog import MODELS, is_valid_model_id
-
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
@@ -65,10 +65,7 @@ class UserModelPrefIn(BaseModel):
 
 @router.get("", response_model=list[ModelInfoOut])
 def list_models() -> list[ModelInfoOut]:
-    return [
-        ModelInfoOut(id=m.id, name=m.name, description=m.description)
-        for m in MODELS
-    ]
+    return [ModelInfoOut(id=m.id, name=m.name, description=m.description) for m in MODELS]
 
 
 @router.get("/me", response_model=UserModelPrefOut)

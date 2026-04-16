@@ -1,4 +1,5 @@
 """Tests for ``app.cc_adapter.compose``."""
+
 from __future__ import annotations
 
 import json
@@ -25,9 +26,7 @@ def test_compose_mcp_config_combines_user_and_global(tmp_path, db_with_rows):
         command="npx",
         args=["-y", "fs"],
     )
-    out = compose_mcp_config(
-        db=db_with_rows, user_id="u1", thread_id="t_abc", tmp_root=tmp_path
-    )
+    out = compose_mcp_config(db=db_with_rows, user_id="u1", thread_id="t_abc", tmp_root=tmp_path)
     data = json.loads(Path(out).read_text())
     assert set(data["mcpServers"].keys()) == {"personal", "team_fs"}
     assert data["mcpServers"]["personal"]["env"] == {"X": "1"}
@@ -36,12 +35,8 @@ def test_compose_mcp_config_combines_user_and_global(tmp_path, db_with_rows):
 
 
 def test_compose_mcp_config_skips_other_users(tmp_path, db_with_rows):
-    db_with_rows.insert_mcp(
-        user_id="u2", name="secret", transport="stdio", command="echo"
-    )
-    out = compose_mcp_config(
-        db=db_with_rows, user_id="u1", thread_id="t1", tmp_root=tmp_path
-    )
+    db_with_rows.insert_mcp(user_id="u2", name="secret", transport="stdio", command="echo")
+    out = compose_mcp_config(db=db_with_rows, user_id="u1", thread_id="t1", tmp_root=tmp_path)
     data = json.loads(Path(out).read_text())
     assert data["mcpServers"] == {}
 
@@ -54,9 +49,7 @@ def test_compose_mcp_config_skips_disabled(tmp_path, db_with_rows):
         command="echo",
         enabled=False,
     )
-    out = compose_mcp_config(
-        db=db_with_rows, user_id="u1", thread_id="t1", tmp_root=tmp_path
-    )
+    out = compose_mcp_config(db=db_with_rows, user_id="u1", thread_id="t1", tmp_root=tmp_path)
     data = json.loads(Path(out).read_text())
     assert data["mcpServers"] == {}
 
@@ -69,9 +62,7 @@ def test_compose_mcp_config_http_transport(tmp_path, db_with_rows):
         url="https://example/mcp",
         headers={"Auth": "Bearer x"},
     )
-    out = compose_mcp_config(
-        db=db_with_rows, user_id="u1", thread_id="t1", tmp_root=tmp_path
-    )
+    out = compose_mcp_config(db=db_with_rows, user_id="u1", thread_id="t1", tmp_root=tmp_path)
     data = json.loads(Path(out).read_text())
     assert data["mcpServers"]["h"] == {
         "url": "https://example/mcp",
@@ -94,8 +85,7 @@ def test_compose_mcp_config_http_without_url_raises(tmp_path, db_with_rows):
 
 
 def test_compose_mcp_config_sse_transport(tmp_path, db_with_rows):
-    db_with_rows.insert_mcp(user_id="u1", name="s", transport="sse",
-                            url="https://example/sse")
+    db_with_rows.insert_mcp(user_id="u1", name="s", transport="sse", url="https://example/sse")
     out = compose_mcp_config(db=db_with_rows, user_id="u1", thread_id="t1", tmp_root=tmp_path)
     data = json.loads(Path(out).read_text())
     assert data["mcpServers"]["s"] == {"url": "https://example/sse"}
@@ -104,8 +94,8 @@ def test_compose_mcp_config_sse_transport(tmp_path, db_with_rows):
 def test_compose_mcp_config_file_is_private(tmp_path, db_with_rows):
     """MCP config may contain API keys in env; file must not be world-readable."""
     import stat
-    db_with_rows.insert_mcp(user_id="u1", name="k", transport="stdio",
-                            command="echo", env={"API_KEY": "secret"})
+
+    db_with_rows.insert_mcp(user_id="u1", name="k", transport="stdio", command="echo", env={"API_KEY": "secret"})
     out = compose_mcp_config(db=db_with_rows, user_id="u1", thread_id="t1", tmp_root=tmp_path)
     mode = stat.S_IMODE(out.stat().st_mode)
     assert mode == 0o600, f"Expected 0o600, got 0o{mode:o}"
@@ -115,15 +105,11 @@ def test_compose_skills_dir_symlinks(tmp_path, db_with_rows):
     skill_src = tmp_path / "skill1"
     skill_src.mkdir()
     (skill_src / "SKILL.md").write_text("---\nname: skill1\n---")
-    db_with_rows.insert_skill(
-        user_id="u1", name="skill1", source="upload", path=str(skill_src)
-    )
+    db_with_rows.insert_skill(user_id="u1", name="skill1", source="upload", path=str(skill_src))
     target = tmp_path / "threads/t1/user-data/.claude/skills"
     compose_skills_dir(db=db_with_rows, user_id="u1", skills_dir=target)
     assert (target / "skill1").is_symlink()
-    assert (target / "skill1" / "SKILL.md").read_text().startswith(
-        "---\nname: skill1"
-    )
+    assert (target / "skill1" / "SKILL.md").read_text().startswith("---\nname: skill1")
 
 
 def test_compose_skills_dir_replaces_existing(tmp_path, db_with_rows):
@@ -132,9 +118,7 @@ def test_compose_skills_dir_replaces_existing(tmp_path, db_with_rows):
     (target / "stale").write_text("leftover")
     skill_src = tmp_path / "skill2"
     skill_src.mkdir()
-    db_with_rows.insert_skill(
-        user_id="u1", name="skill2", source="upload", path=str(skill_src)
-    )
+    db_with_rows.insert_skill(user_id="u1", name="skill2", source="upload", path=str(skill_src))
     compose_skills_dir(db=db_with_rows, user_id="u1", skills_dir=target)
     assert not (target / "stale").exists()
     assert (target / "skill2").is_symlink()
@@ -143,8 +127,7 @@ def test_compose_skills_dir_replaces_existing(tmp_path, db_with_rows):
 def test_compose_skills_dir_skips_disabled(tmp_path, db_with_rows):
     skill_src = tmp_path / "off_skill"
     skill_src.mkdir()
-    db_with_rows.insert_skill(user_id="u1", name="off_skill", source="upload",
-                              path=str(skill_src), enabled=False)
+    db_with_rows.insert_skill(user_id="u1", name="off_skill", source="upload", path=str(skill_src), enabled=False)
     target = tmp_path / ".claude/skills"
     compose_skills_dir(db=db_with_rows, user_id="u1", skills_dir=target)
     assert not (target / "off_skill").exists()

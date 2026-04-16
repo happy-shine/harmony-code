@@ -4,6 +4,7 @@ These tests do NOT spawn the ``claude`` CLI, so they live in a separate
 module from :mod:`test_adapter` (which is skipped wholesale when ``claude``
 is missing from PATH).
 """
+
 from __future__ import annotations
 
 from app.cc_adapter.adapter import CCAdapter

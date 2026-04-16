@@ -1,4 +1,5 @@
 """Cancel via client disconnect + explicit /cancel stub."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,8 +8,7 @@ import shutil
 import httpx
 import pytest
 
-pytestmark = pytest.mark.skipif(shutil.which("claude") is None,
-                                reason="claude CLI not installed")
+pytestmark = pytest.mark.skipif(shutil.which("claude") is None, reason="claude CLI not installed")
 
 
 @pytest.mark.asyncio
@@ -23,7 +23,8 @@ async def test_client_disconnect_allows_new_message(gateway_server):
 
         # Start a streaming request, read a few bytes, abort.
         async with client.stream(
-            "POST", f"{base}/api/threads/{tid}/messages",
+            "POST",
+            f"{base}/api/threads/{tid}/messages",
             json={"content": "write a 300-word poem slowly"},
         ) as r:
             assert r.status_code == 200

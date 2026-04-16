@@ -10,6 +10,7 @@ All fixtures follow Task 3.3's pattern: construct :class:`alembic.config.Config`
 **without** the ini path, so alembic doesn't call ``logging.config.fileConfig``
 and break caplog-based tests elsewhere in the suite.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,12 +18,11 @@ import os
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 
+from alembic import command
 from app.db import Db, get_engine
-
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -114,9 +114,7 @@ def test_global_row_visible_in_list(client):
     c, tmp = client
     # Direct DB insert with user_id=None to simulate a global/admin row.
     db = Db(get_engine(tmp))
-    db.insert_mcp(
-        user_id=None, name="global_srv", transport="stdio", command="true"
-    )
+    db.insert_mcp(user_id=None, name="global_srv", transport="stdio", command="true")
     rows = c.get("/api/mcp").json()
     names = [r["name"] for r in rows]
     assert "global_srv" in names
@@ -166,9 +164,7 @@ def test_patch_updates_subset_preserves_rest(client):
 def test_patch_other_users_row_is_403(client):
     c, tmp = client
     db = Db(get_engine(tmp))
-    other_id = db.insert_mcp(
-        user_id="u_other", name="theirs", transport="stdio", command="true"
-    )
+    other_id = db.insert_mcp(user_id="u_other", name="theirs", transport="stdio", command="true")
     # u_other's row is NOT visible in u_default's GET (different owner, not global).
     rows = c.get("/api/mcp").json()
     assert all(r["id"] != other_id for r in rows)
@@ -180,9 +176,7 @@ def test_patch_other_users_row_is_403(client):
 def test_patch_global_row_is_403(client):
     c, tmp = client
     db = Db(get_engine(tmp))
-    gid = db.insert_mcp(
-        user_id=None, name="global_srv", transport="stdio", command="true"
-    )
+    gid = db.insert_mcp(user_id=None, name="global_srv", transport="stdio", command="true")
     r = c.patch(f"/api/mcp/{gid}", json={"enabled": False})
     assert r.status_code == 403
 
@@ -198,9 +192,7 @@ def test_patch_nonexistent_is_404(client):
 
 def test_delete_own_row_then_list_omits(client):
     c, _ = client
-    mid = c.post(
-        "/api/mcp", json={"name": "d", "transport": "stdio", "command": "true"}
-    ).json()["id"]
+    mid = c.post("/api/mcp", json={"name": "d", "transport": "stdio", "command": "true"}).json()["id"]
 
     r = c.delete(f"/api/mcp/{mid}")
     assert r.status_code == 200
@@ -213,9 +205,7 @@ def test_delete_own_row_then_list_omits(client):
 def test_delete_global_row_is_403(client):
     c, tmp = client
     db = Db(get_engine(tmp))
-    gid = db.insert_mcp(
-        user_id=None, name="global_srv", transport="stdio", command="true"
-    )
+    gid = db.insert_mcp(user_id=None, name="global_srv", transport="stdio", command="true")
     r = c.delete(f"/api/mcp/{gid}")
     assert r.status_code == 403
     # row must still be present
@@ -232,9 +222,7 @@ def test_delete_nonexistent_is_404(client):
 def test_delete_other_users_row_is_403(client):
     c, tmp = client
     db = Db(get_engine(tmp))
-    other_id = db.insert_mcp(
-        user_id="u_other", name="theirs", transport="stdio", command="true"
-    )
+    other_id = db.insert_mcp(user_id="u_other", name="theirs", transport="stdio", command="true")
     r = c.delete(f"/api/mcp/{other_id}")
     assert r.status_code == 403
 
@@ -285,9 +273,7 @@ def test_end_to_end_create_then_send_message_composes_row(client, monkeypatch):
 
     # 3. Create a thread + send a message so send_message re-composes MCP.
     tid = c.post("/api/threads", json={}).json()["id"]
-    with c.stream(
-        "POST", f"/api/threads/{tid}/messages", json={"content": "hi"}
-    ) as resp:
+    with c.stream("POST", f"/api/threads/{tid}/messages", json={"content": "hi"}) as resp:
         assert resp.status_code == 200
         for _ in resp.iter_text():
             pass

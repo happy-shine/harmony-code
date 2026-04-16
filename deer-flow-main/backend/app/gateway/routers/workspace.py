@@ -13,6 +13,7 @@ containment check uses :meth:`pathlib.Path.is_relative_to` (Python 3.9+)
 to avoid the classic sibling-prefix bug (``/tmp/work`` vs
 ``/tmp/work-evil/x``).
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,7 +24,6 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.gateway.deps import session_store as _store
-
 
 logger = logging.getLogger(__name__)
 
@@ -132,9 +132,7 @@ def _walk(cwd: Path) -> list[dict]:
                 continue
             count += 1
             if count > _MAX_NODES:
-                raise HTTPException(
-                    status_code=413, detail="workspace_tree_too_large"
-                )
+                raise HTTPException(status_code=413, detail="workspace_tree_too_large")
             rel = f"{rel_prefix}{entry.name}" if not rel_prefix else f"{rel_prefix}/{entry.name}"
             node = _node(entry, rel)
             if node["type"] == "dir":

@@ -115,7 +115,7 @@ class ExtensionsConfig(BaseModel):
             return None
 
     @classmethod
-    def from_file(cls, config_path: str | None = None) -> "ExtensionsConfig":
+    def from_file(cls, config_path: str | None = None) -> ExtensionsConfig:
         """Load extensions config from JSON file.
 
         Returns an empty config if the file is not found (extensions are

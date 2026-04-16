@@ -18,13 +18,13 @@ Decisions:
   without valid ``path`` values would produce broken symlinks in
   :func:`app.cc_adapter.compose.compose_skills_dir`.
 """
+
 from __future__ import annotations
 
 import argparse
 import logging
 import sys
 from pathlib import Path
-
 
 # Make the script runnable both from ``backend/`` (``python scripts/...``)
 # and from the repo root (``python backend/scripts/...``). The latter
@@ -35,7 +35,6 @@ if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
 from sqlalchemy import text  # noqa: E402  (path adjusted above)
-
 
 logger = logging.getLogger("migrate_extensions_config")
 
@@ -51,10 +50,7 @@ def _mcp_global_row_exists(db, name: str) -> bool:
     """
     with db.engine.connect() as conn:
         row = conn.execute(
-            text(
-                "SELECT 1 FROM mcp_servers "
-                "WHERE user_id IS NULL AND name = :name LIMIT 1"
-            ),
+            text("SELECT 1 FROM mcp_servers WHERE user_id IS NULL AND name = :name LIMIT 1"),
             {"name": name},
         ).first()
     return row is not None
@@ -102,9 +98,7 @@ def migrate(*, config_path: str | None = None, dry_run: bool = False) -> int:
     if cfg.skills:
         names = sorted(cfg.skills.keys())
         logger.warning(
-            "skipping %d skill(s) from legacy config (%s); legacy config "
-            "tracks only enabled-state, not skill files. Re-upload via "
-            "POST /api/skills after migration.",
+            "skipping %d skill(s) from legacy config (%s); legacy config tracks only enabled-state, not skill files. Re-upload via POST /api/skills after migration.",
             len(names),
             ", ".join(names),
         )
@@ -119,9 +113,7 @@ def migrate(*, config_path: str | None = None, dry_run: bool = False) -> int:
     inserted = 0
     for name, server in cfg.mcp_servers.items():
         if _mcp_global_row_exists(db, name):
-            logger.info(
-                "MCP %r already present as a global row, skipping", name
-            )
+            logger.info("MCP %r already present as a global row, skipping", name)
             continue
         if dry_run:
             logger.info(

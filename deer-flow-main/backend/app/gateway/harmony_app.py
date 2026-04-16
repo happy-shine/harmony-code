@@ -1,5 +1,6 @@
 """M1 harmony gateway app. Slim entrypoint mounting only the cc_adapter SSE router.
 M5 will consolidate with the post-LangGraph-deletion gateway. Until then this runs independently."""
+
 from fastapi import FastAPI
 
 from app.gateway.routers import harmony_models as models_router

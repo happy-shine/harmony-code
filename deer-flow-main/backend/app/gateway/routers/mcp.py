@@ -8,6 +8,7 @@ message in any thread — no caching layer to invalidate.
 M3 scope: ``user_id`` is stubbed to ``"u_default"`` via
 :func:`app.gateway.deps.current_user_id`; M5 wires real auth (better-auth).
 """
+
 from __future__ import annotations
 
 import json
@@ -18,7 +19,6 @@ from pydantic import BaseModel, Field
 
 from app.db import McpRow
 from app.gateway.deps import current_user_id, get_db
-
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
@@ -85,9 +85,7 @@ def list_mcp(user_id: str = Depends(current_user_id)) -> list[MCPServerOut]:
 
 
 @router.post("", response_model=MCPServerOut)
-def create_mcp(
-    body: MCPServerIn, user_id: str = Depends(current_user_id)
-) -> MCPServerOut:
+def create_mcp(body: MCPServerIn, user_id: str = Depends(current_user_id)) -> MCPServerOut:
     db = get_db()
     new_id = db.insert_mcp(
         user_id=user_id,
@@ -108,9 +106,7 @@ def create_mcp(
 
 
 @router.delete("/{mcp_id}")
-def delete_mcp(
-    mcp_id: str, user_id: str = Depends(current_user_id)
-) -> dict[str, Any]:
+def delete_mcp(mcp_id: str, user_id: str = Depends(current_user_id)) -> dict[str, Any]:
     db = get_db()
     row = db.get_mcp(mcp_id)
     if row is None:

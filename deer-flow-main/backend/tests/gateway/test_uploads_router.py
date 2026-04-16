@@ -12,19 +12,18 @@ Covers the harmony rewrite of ``/api/threads/{tid}/uploads``:
 Security-critical — the filename tests must fail loudly before any
 production deploy, same as the workspace router.
 """
+
 from __future__ import annotations
 
-import io
 import os
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 
+from alembic import command
 from app.db import Db, get_engine
-
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -252,20 +251,23 @@ def test_list_returns_newest_first(client, tmp_path):
     from sqlalchemy import text as _text
 
     old_id = db.insert_upload(
-        thread_id=tid, user_id=None, filename="older.txt",
-        size=1, content_type="text/plain",
+        thread_id=tid,
+        user_id=None,
+        filename="older.txt",
+        size=1,
+        content_type="text/plain",
     )
     new_id = db.insert_upload(
-        thread_id=tid, user_id=None, filename="newer.txt",
-        size=1, content_type="text/plain",
+        thread_id=tid,
+        user_id=None,
+        filename="newer.txt",
+        size=1,
+        content_type="text/plain",
     )
     # Rewrite older's timestamp a minute into the past.
     with db.engine.begin() as conn:
         conn.execute(
-            _text(
-                "UPDATE uploads SET created_at = datetime('now', '-1 minute') "
-                "WHERE id = :id"
-            ),
+            _text("UPDATE uploads SET created_at = datetime('now', '-1 minute') WHERE id = :id"),
             {"id": old_id},
         )
 
@@ -337,14 +339,14 @@ def test_delete_file_missing_but_row_present_still_removes_row_and_logs(client, 
     assert not on_disk.exists()
 
     import logging
+
     with caplog.at_level(logging.WARNING, logger="app.gateway.routers.uploads"):
         r = c.delete(f"/api/threads/{tid}/uploads/{entry['id']}")
     assert r.status_code == 200
     db = Db(get_engine(tmp))
     assert db.get_upload(entry["id"]) is None
     # We logged something about the missing file
-    assert any("ghost.txt" in rec.message or "filesystem" in rec.message.lower()
-               for rec in caplog.records), caplog.text
+    assert any("ghost.txt" in rec.message or "filesystem" in rec.message.lower() for rec in caplog.records), caplog.text
 
 
 def test_delete_cross_thread_404(client):

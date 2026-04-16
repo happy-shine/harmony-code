@@ -9,6 +9,7 @@ We intentionally use raw SQL via :func:`sqlalchemy.text` instead of the
 ORM: the table shapes are small and stable, and staying close to SQL
 keeps the surface area minimal and predictable.
 """
+
 from __future__ import annotations
 
 import json as _json
@@ -159,16 +160,9 @@ class Db:
             )
         return new_id
 
-    def query_mcp_for_user(
-        self, *, user_id: str, enabled_only: bool = True
-    ) -> list[McpRow]:
+    def query_mcp_for_user(self, *, user_id: str, enabled_only: bool = True) -> list[McpRow]:
         """Return MCP rows owned by ``user_id`` plus global rows (``user_id IS NULL``)."""
-        sql = (
-            "SELECT id, user_id, name, transport, command, args_json, url, "
-            "headers_json, env_json, enabled "
-            "FROM mcp_servers "
-            "WHERE (user_id = :uid OR user_id IS NULL)"
-        )
+        sql = "SELECT id, user_id, name, transport, command, args_json, url, headers_json, env_json, enabled FROM mcp_servers WHERE (user_id = :uid OR user_id IS NULL)"
         if enabled_only:
             sql += " AND enabled = 1"
         sql += " ORDER BY name"
@@ -182,23 +176,13 @@ class Db:
         Used by the CRUD router; callers that want only enabled rows for a
         CC spawn should still use :meth:`query_mcp_for_user`.
         """
-        sql = (
-            "SELECT id, user_id, name, transport, command, args_json, url, "
-            "headers_json, env_json, enabled "
-            "FROM mcp_servers "
-            "WHERE (user_id = :uid OR user_id IS NULL) "
-            "ORDER BY name"
-        )
+        sql = "SELECT id, user_id, name, transport, command, args_json, url, headers_json, env_json, enabled FROM mcp_servers WHERE (user_id = :uid OR user_id IS NULL) ORDER BY name"
         with self.engine.connect() as conn:
             rows = conn.execute(text(sql), {"uid": user_id}).mappings().all()
         return [McpRow(**{**dict(r), "enabled": bool(r["enabled"])}) for r in rows]
 
     def get_mcp(self, mcp_id: str) -> McpRow | None:
-        sql = (
-            "SELECT id, user_id, name, transport, command, args_json, url, "
-            "headers_json, env_json, enabled "
-            "FROM mcp_servers WHERE id = :id"
-        )
+        sql = "SELECT id, user_id, name, transport, command, args_json, url, headers_json, env_json, enabled FROM mcp_servers WHERE id = :id"
         with self.engine.connect() as conn:
             row = conn.execute(text(sql), {"id": mcp_id}).mappings().first()
         if row is None:
@@ -207,9 +191,7 @@ class Db:
 
     def delete_mcp(self, mcp_id: str) -> None:
         with self.engine.begin() as conn:
-            conn.execute(
-                text("DELETE FROM mcp_servers WHERE id = :id"), {"id": mcp_id}
-            )
+            conn.execute(text("DELETE FROM mcp_servers WHERE id = :id"), {"id": mcp_id})
 
     def update_mcp(self, mcp_id: str, patch: dict) -> None:
         """Update only the columns present in ``patch``.
@@ -272,15 +254,9 @@ class Db:
             )
         return new_id
 
-    def query_skills_for_user(
-        self, *, user_id: str, enabled_only: bool = True
-    ) -> list[SkillRow]:
+    def query_skills_for_user(self, *, user_id: str, enabled_only: bool = True) -> list[SkillRow]:
         """Return skill rows owned by ``user_id`` plus global rows (``user_id IS NULL``)."""
-        sql = (
-            "SELECT id, user_id, name, source, path, enabled "
-            "FROM skills "
-            "WHERE (user_id = :uid OR user_id IS NULL)"
-        )
+        sql = "SELECT id, user_id, name, source, path, enabled FROM skills WHERE (user_id = :uid OR user_id IS NULL)"
         if enabled_only:
             sql += " AND enabled = 1"
         sql += " ORDER BY name"
@@ -294,21 +270,13 @@ class Db:
         Used by the CRUD router; callers that want only enabled rows for a
         CC spawn should still use :meth:`query_skills_for_user`.
         """
-        sql = (
-            "SELECT id, user_id, name, source, path, enabled "
-            "FROM skills "
-            "WHERE (user_id = :uid OR user_id IS NULL) "
-            "ORDER BY name"
-        )
+        sql = "SELECT id, user_id, name, source, path, enabled FROM skills WHERE (user_id = :uid OR user_id IS NULL) ORDER BY name"
         with self.engine.connect() as conn:
             rows = conn.execute(text(sql), {"uid": user_id}).mappings().all()
         return [SkillRow(**{**dict(r), "enabled": bool(r["enabled"])}) for r in rows]
 
     def get_skill(self, skill_id: str) -> SkillRow | None:
-        sql = (
-            "SELECT id, user_id, name, source, path, enabled "
-            "FROM skills WHERE id = :id"
-        )
+        sql = "SELECT id, user_id, name, source, path, enabled FROM skills WHERE id = :id"
         with self.engine.connect() as conn:
             row = conn.execute(text(sql), {"id": skill_id}).mappings().first()
         if row is None:
@@ -317,9 +285,7 @@ class Db:
 
     def delete_skill(self, skill_id: str) -> None:
         with self.engine.begin() as conn:
-            conn.execute(
-                text("DELETE FROM skills WHERE id = :id"), {"id": skill_id}
-            )
+            conn.execute(text("DELETE FROM skills WHERE id = :id"), {"id": skill_id})
 
     def update_skill(self, skill_id: str, patch: dict) -> None:
         """Update only the columns present in ``patch``.
@@ -354,10 +320,7 @@ class Db:
         the latter means they explicitly cleared it (same effect, but
         ``send_message`` still checks the row to decide).
         """
-        sql = (
-            "SELECT user_id, default_model, extras_json "
-            "FROM user_prefs WHERE user_id = :uid"
-        )
+        sql = "SELECT user_id, default_model, extras_json FROM user_prefs WHERE user_id = :uid"
         with self.engine.connect() as conn:
             row = conn.execute(text(sql), {"uid": user_id}).mappings().first()
         if row is None:
@@ -395,9 +358,7 @@ class Db:
             return  # nothing to update
         with self.engine.begin() as conn:
             conn.execute(
-                text(
-                    "UPDATE user_prefs SET default_model = :dm WHERE user_id = :uid"
-                ),
+                text("UPDATE user_prefs SET default_model = :dm WHERE user_id = :uid"),
                 {"uid": user_id, "dm": default_model},
             )
 
@@ -442,20 +403,13 @@ class Db:
         rows share a ``created_at`` value (SQLite's default precision
         is 1s, and back-to-back inserts in tests do tie).
         """
-        sql = (
-            "SELECT id, thread_id, user_id, filename, size, content_type, "
-            "created_at FROM uploads WHERE thread_id = :tid "
-            "ORDER BY created_at DESC, id DESC"
-        )
+        sql = "SELECT id, thread_id, user_id, filename, size, content_type, created_at FROM uploads WHERE thread_id = :tid ORDER BY created_at DESC, id DESC"
         with self.engine.connect() as conn:
             rows = conn.execute(text(sql), {"tid": thread_id}).mappings().all()
         return [UploadRow(**dict(r)) for r in rows]
 
     def get_upload(self, upload_id: str) -> UploadRow | None:
-        sql = (
-            "SELECT id, thread_id, user_id, filename, size, content_type, "
-            "created_at FROM uploads WHERE id = :id"
-        )
+        sql = "SELECT id, thread_id, user_id, filename, size, content_type, created_at FROM uploads WHERE id = :id"
         with self.engine.connect() as conn:
             row = conn.execute(text(sql), {"id": upload_id}).mappings().first()
         if row is None:

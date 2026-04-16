@@ -4,17 +4,17 @@ Currently: ``user_prefs`` CRUD (Task 3.6) and ``uploads`` CRUD
 (Task 4.3). Router-level tests live under ``tests/gateway/`` — this
 file is for the raw ``Db`` API.
 """
+
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.config import Config
 
+from alembic import command
 from app.db import Db, get_engine
-
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
