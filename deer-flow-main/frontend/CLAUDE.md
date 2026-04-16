@@ -1,35 +1,59 @@
-# CLAUDE.md (harmony-code fork of deer-flow frontend)
+# CLAUDE.md (harmony-code frontend)
 
-> **This tree is being rewritten for harmony-code.** Routes, hooks, and
-> message rendering tied to LangGraph are being replaced with a CC-native
-> event model.
+Next.js chat UI that consumes the gateway's SSE stream and renders
+CC-native events.
 
-## Where to read before making changes
+## Stack
 
-- `docs/plans/2026-04-15-harmony-code-design.md` §4 (前端改造) — target event
-  model: TS types 1:1 with CC stream-json. Thread hooks consume
-  `POST /api/threads/{tid}/messages` SSE instead of LangGraph SDK.
-- `docs/plans/2026-04-15-harmony-code-plan.md` M4 — task-level frontend
-  changes (thread hooks, artifact panel, skills/MCP UI).
-- `docs/plans/cc-cli-notes.md` — canonical CC event shapes (assistant / user
-  blocks, tool_use ↔ tool_result correlation by `tool_use_id`, system.init
-  fields, rate_limit_event, hook_* frames). Source of truth; the current
-  frontend's message types do NOT reflect CC yet.
+Next.js 16, React 19, TypeScript 5.8, Tailwind 4, pnpm 10.26.2. Commands
+(`pnpm dev|build|check|lint|test|typecheck|start`) are in the root
+README — not repeated here.
 
-## Stack (unchanged)
+## Event model
 
-Next.js 16, React 19, TypeScript 5.8, Tailwind 4, pnpm 10.26.2.
-Commands (`pnpm dev|build|check|lint|test|typecheck|start`) are in the
-existing README; harmony-code does not change the command surface.
+TS event types mirror CC stream-json 1:1 (`system.init`, `assistant`,
+`user`, `tool_use`, `tool_result`, `result`, `rate_limit_event`, `hook_*`).
+See `docs/plans/cc-cli-notes.md` for the canonical frame shapes — that
+file is the source of truth, do not guess. Thread hooks under
+`src/core/threads/` consume `POST /api/threads/{tid}/messages` SSE and
+reduce frames into render state.
 
-## Removed in M4/M5
+## Auth UX
 
-LangGraph SDK client (`core/api/`), LangGraph-shaped message types, any
-assistant-routing logic tied to sub-agents. Replaced with CC jsonl event
-streaming.
+Login page posts to `/api/auth/sign-in/email`. Session cookie is
+`harmony_session` (HttpOnly, SameSite=Lax). All API calls MUST use
+`credentials: "include"` so the cookie rides along.
 
-## If a subagent is about to edit this tree
+## Invariants — do not break
 
-Check the current task in the plan first. Many files under `core/messages/`
-and `core/threads/` will be rewritten — do NOT "improve" them for the old
-model; wait for the task that replaces them.
+- **No LangGraph SDK.** The gateway streams CC stream-json; do not
+  reintroduce `@langchain/langgraph-sdk` or LangGraph-shaped message
+  types.
+- **tool_use ↔ tool_result correlate by `tool_use_id`.** Never match by
+  index, position, or heuristic; the id is the contract (see
+  `cc-cli-notes.md`).
+- **Cost / rate-limit UI reads from frames only.** Token usage comes
+  from the `result` frame; rate-limit state comes from
+  `rate_limit_event`. Do not synthesize these client-side.
+- **Session cookie is the only auth surface.** Do not introduce bearer
+  tokens or `Authorization` headers for app routes.
+
+## Dead code (legacy, not wired in)
+
+`src/core/api/` (`api-client.ts`, `stream-mode.ts`, `index.ts`) is a
+LangGraph-era holdover with no remaining importers. Several files under
+`src/core/messages/`, `src/core/threads/`, and `src/components/workspace/`
+still contain `langgraph`-named symbols that outlived the rewrite.
+Before touching any of them, verify they are on the live path; prefer
+deleting to "fixing." Confirm with the team before large-scale removal.
+
+## Reading order for a new task
+
+1. Root `README.md` — install and run.
+2. `docs/plans/cc-cli-notes.md` — event shapes.
+3. `src/core/threads/cc-hooks.ts` + `cc-stream.ts` — where SSE frames
+   enter the UI. `src/core/messages/cc-reducer.ts` — how they become
+   render state.
+
+`docs/plans/2026-04-15-harmony-code-{design,plan}.md` are historical;
+optional background, not required reading.
