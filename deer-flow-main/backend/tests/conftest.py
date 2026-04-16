@@ -1,53 +1,20 @@
 """Test configuration for the backend test suite.
 
-Sets up sys.path and pre-mocks modules that would cause circular import
-issues when unit-testing lightweight config/registry code in isolation.
+Ensures the test runner can resolve ``app`` (backend root) and
+``scripts/`` (top-level utilities like ``wizard`` and ``doctor``)
+from any working directory.
 """
 
 import importlib.util
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
-# Make 'app' and 'deerflow' importable from any working directory
+# Make 'app' (backend/) and 'scripts/' (repo-root/scripts) importable
+# regardless of the cwd pytest was invoked from.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-
-# Break the circular import chain that exists in production code:
-#   deerflow.subagents.__init__
-#     -> .executor (SubagentExecutor, SubagentResult)
-#       -> deerflow.agents.thread_state
-#         -> deerflow.agents.__init__
-#           -> lead_agent.agent
-#             -> subagent_limit_middleware
-#               -> deerflow.subagents.executor  <-- circular!
-#
-# By injecting a mock for deerflow.subagents.executor *before* any test module
-# triggers the import, __init__.py's "from .executor import ..." succeeds
-# immediately without running the real executor module.
-_executor_mock = MagicMock()
-_executor_mock.SubagentExecutor = MagicMock
-_executor_mock.SubagentResult = MagicMock
-_executor_mock.SubagentStatus = MagicMock
-_executor_mock.MAX_CONCURRENT_SUBAGENTS = 3
-_executor_mock.get_background_task_result = MagicMock()
-
-sys.modules["deerflow.subagents.executor"] = _executor_mock
-
-# tests/test_client.py imports model names from routers that M3 has rewritten
-# (McpConfigResponse) and Tasks 3.5/3.6 will further replace (SkillsListResponse,
-# ModelsListResponse, MemoryConfigResponse, UploadResponse). The whole file is
-# M5 removal scope per backend/CLAUDE.md. Skip collection until M5 deletes it.
-#
-# tests/test_skills_custom_router.py exercises the LangGraph-era custom-skill
-# CRUD endpoints (``/api/skills/custom/...``) that Task 3.5 removed along with
-# the rest of the deerflow.skills-coupled router. The DB-backed replacement
-# covers the same capability via ``/api/skills`` + upload/git install; the old
-# router was bound to ``extensions_config.json`` + markdown-file storage and is
-# M5 removal scope. Skip collection.
-collect_ignore = ["test_client.py", "test_skills_custom_router.py"]
 
 
 @pytest.fixture()
