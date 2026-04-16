@@ -24,8 +24,30 @@ import argparse
 import logging
 import sys
 
+from sqlalchemy import text
+
 
 logger = logging.getLogger("migrate_extensions_config")
+
+
+def _mcp_global_row_exists(db, name: str) -> bool:
+    """Return True if a global (``user_id IS NULL``) mcp_servers row with
+    ``name`` already exists.
+
+    Needed because SQLite's UNIQUE index treats ``NULL`` as distinct per
+    the SQL standard — so the ``ix_mcp_user_name`` index does NOT block
+    duplicate global rows. Pre-checking here is the cheapest way to stay
+    idempotent.
+    """
+    with db.engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT 1 FROM mcp_servers "
+                "WHERE user_id IS NULL AND name = :name LIMIT 1"
+            ),
+            {"name": name},
+        ).first()
+    return row is not None
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -73,6 +95,11 @@ def migrate(*, config_path: str | None = None, dry_run: bool = False) -> int:
 
     inserted = 0
     for name, server in cfg.mcp_servers.items():
+        if _mcp_global_row_exists(db, name):
+            logger.info(
+                "MCP %r already present as a global row, skipping", name
+            )
+            continue
         db.insert_mcp(
             user_id=None,
             name=name,

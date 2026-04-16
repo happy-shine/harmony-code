@@ -192,3 +192,38 @@ def test_http_server_with_headers_inserts_url_and_headers_json(db, tmp_path):
     }
     assert row.command is None
     assert row.args_json is None
+
+
+# --- 5. Idempotency -------------------------------------------------------
+
+
+def test_migration_is_idempotent_on_rerun(db, tmp_path, caplog):
+    """Running the migration twice yields the same row count — no duplicates,
+    no IntegrityError escaping out of the script."""
+    from scripts.migrate_extensions_config import main
+
+    path = _write_config(
+        tmp_path,
+        {
+            "mcpServers": {
+                "fs": {"type": "stdio", "command": "true", "args": ["--once"]},
+                "remote": {"type": "http", "url": "https://x/y"},
+            },
+            "skills": {},
+        },
+    )
+
+    rc1 = main(["--config", str(path)])
+    assert rc1 == 0
+    count_after_first = _count_mcp(db)
+    assert count_after_first == 2
+
+    # Second run must not raise and must not grow the table.
+    with caplog.at_level(logging.INFO):
+        rc2 = main(["--config", str(path)])
+    assert rc2 == 0
+    assert _count_mcp(db) == count_after_first
+
+    # And a "skipping" log line should have been emitted for each name.
+    skip_msgs = [r for r in caplog.records if "skip" in r.message.lower()]
+    assert len(skip_msgs) >= 2
