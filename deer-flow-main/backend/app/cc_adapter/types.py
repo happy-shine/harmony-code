@@ -14,6 +14,11 @@ class SpawnConfig:
     add_dirs: list[str] = field(default_factory=list)
     permission_mode: str = "bypassPermissions"
     extra_env: dict[str, str] = field(default_factory=dict)
+    # Appended to CC's default system prompt via ``--append-system-prompt``.
+    # Harmony uses this to inject the user's memory facts so the agent
+    # sees them as persistent context across threads. ``None`` → omit the
+    # flag entirely (no-op, matches CC's default behavior).
+    append_system_prompt: str | None = None
     # Wall-clock budget for the entire CC run, in seconds. ``None``
     # disables the guard entirely (the MVP default — legitimate runs
     # can legitimately take a long time). On timeout the adapter emits

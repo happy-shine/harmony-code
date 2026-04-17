@@ -28,6 +28,67 @@ export interface HarmonySkill {
   enabled: boolean;
 }
 
+export async function uploadSkillZip(file: File): Promise<HarmonySkill> {
+  const form = new FormData();
+  form.append("file", file);
+  const r = await fetch("/api/skills/upload", {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (!r.ok) {
+    let detail = `${r.status}`;
+    try {
+      const j = (await r.json()) as { detail?: string };
+      if (j.detail) detail = j.detail;
+    } catch {
+      // fall through
+    }
+    throw new Error(detail);
+  }
+  return (await r.json()) as HarmonySkill;
+}
+
+export async function gitInstallSkill(
+  url: string,
+  name?: string,
+): Promise<HarmonySkill> {
+  const r = await fetch("/api/skills/git", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(name ? { url, name } : { url }),
+  });
+  if (!r.ok) {
+    let detail = `${r.status}`;
+    try {
+      const j = (await r.json()) as { detail?: string };
+      if (j.detail) detail = j.detail;
+    } catch {
+      // fall through
+    }
+    throw new Error(detail);
+  }
+  return (await r.json()) as HarmonySkill;
+}
+
+export async function deleteHarmonySkill(id: string): Promise<void> {
+  const r = await fetch(`/api/skills/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!r.ok) {
+    let detail = `${r.status}`;
+    try {
+      const j = (await r.json()) as { detail?: string };
+      if (j.detail) detail = j.detail;
+    } catch {
+      // fall through
+    }
+    throw new Error(detail);
+  }
+}
+
 export async function fetchHarmonySkills(): Promise<HarmonySkill[]> {
   const r = await fetch("/api/skills", { method: "GET", credentials: "include", cache: "no-store" });
   if (!r.ok) throw new Error(`list skills failed: ${r.status}`);
@@ -70,6 +131,37 @@ export function useToggleHarmonySkill() {
   return useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
       patchHarmonySkill(id, { enabled }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["harmony-skills"] });
+    },
+  });
+}
+
+export function useUploadSkillZip() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => uploadSkillZip(file),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["harmony-skills"] });
+    },
+  });
+}
+
+export function useGitInstallSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ url, name }: { url: string; name?: string }) =>
+      gitInstallSkill(url, name),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["harmony-skills"] });
+    },
+  });
+}
+
+export function useDeleteHarmonySkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteHarmonySkill(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["harmony-skills"] });
     },

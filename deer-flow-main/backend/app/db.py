@@ -98,6 +98,24 @@ class UploadRow:
 
 
 @dataclass
+class MemoryFactRow:
+    """One row of ``memory_facts``.
+
+    ``created_at`` comes back as an ISO string under SQLAlchemy+sqlite3
+    (same pattern as :class:`UploadRow`). Confidence is a float in
+    ``[0.0, 1.0]``; category/source are opaque display tags.
+    """
+
+    id: str
+    user_id: str
+    content: str
+    category: str
+    confidence: float
+    source: str
+    created_at: datetime | str | None
+
+
+@dataclass
 class UserRow:
     """One row of ``users`` (Task 5.2 auth).
 
@@ -465,6 +483,97 @@ class Db:
                 text("DELETE FROM uploads WHERE id = :id"),
                 {"id": upload_id},
             )
+
+    # ------------------------------------------------------------------
+    # Memory facts (v1: user-curated key facts; summaries not yet backed)
+
+    def insert_memory_fact(
+        self,
+        *,
+        user_id: str,
+        content: str,
+        category: str = "context",
+        confidence: float = 0.8,
+        source: str = "manual",
+    ) -> str:
+        """Insert a new memory fact row for ``user_id`` and return its id."""
+        new_id = f"fact_{uuid.uuid4().hex[:12]}"
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO memory_facts
+                        (id, user_id, content, category, confidence, source)
+                    VALUES
+                        (:id, :uid, :content, :cat, :conf, :src)
+                    """
+                ),
+                {
+                    "id": new_id,
+                    "uid": user_id,
+                    "content": content,
+                    "cat": category,
+                    "conf": confidence,
+                    "src": source,
+                },
+            )
+        return new_id
+
+    def list_memory_facts_for_user(self, user_id: str) -> list[MemoryFactRow]:
+        """All memory facts for ``user_id``, newest-first (tiebreak on id)."""
+        sql = (
+            "SELECT id, user_id, content, category, confidence, source, created_at "
+            "FROM memory_facts WHERE user_id = :uid "
+            "ORDER BY created_at DESC, id DESC"
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(text(sql), {"uid": user_id}).mappings().all()
+        return [MemoryFactRow(**dict(r)) for r in rows]
+
+    def get_memory_fact(self, fact_id: str) -> MemoryFactRow | None:
+        sql = (
+            "SELECT id, user_id, content, category, confidence, source, created_at "
+            "FROM memory_facts WHERE id = :id"
+        )
+        with self.engine.connect() as conn:
+            row = conn.execute(text(sql), {"id": fact_id}).mappings().first()
+        if row is None:
+            return None
+        return MemoryFactRow(**dict(row))
+
+    def update_memory_fact(self, fact_id: str, patch: dict) -> None:
+        """Apply a partial update. Only whitelisted keys are accepted.
+
+        Silently no-ops if ``patch`` has no recognized keys; callers have
+        already validated against pydantic so this is belt-and-suspenders.
+        """
+        allowed = {"content", "category", "confidence"}
+        fields = {k: v for k, v in patch.items() if k in allowed and v is not None}
+        if not fields:
+            return
+        assignments = ", ".join(f"{k} = :{k}" for k in fields)
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(f"UPDATE memory_facts SET {assignments} WHERE id = :id"),
+                {**fields, "id": fact_id},
+            )
+
+    def delete_memory_fact(self, fact_id: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM memory_facts WHERE id = :id"),
+                {"id": fact_id},
+            )
+
+    def clear_memory_facts_for_user(self, user_id: str) -> int:
+        """Delete every memory fact owned by ``user_id``. Returns the number
+        of rows deleted so the caller can surface a count."""
+        with self.engine.begin() as conn:
+            res = conn.execute(
+                text("DELETE FROM memory_facts WHERE user_id = :uid"),
+                {"uid": user_id},
+            )
+            return res.rowcount or 0
 
     # ------------------------------------------------------------------
     # Users + auth sessions (M5 Task 5.2)

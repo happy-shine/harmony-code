@@ -51,6 +51,8 @@ class CCAdapter:
             cmd += ["--mcp-config", cfg.mcp_config_path]
         if cfg.model:
             cmd += ["--model", cfg.model]
+        if cfg.append_system_prompt:
+            cmd += ["--append-system-prompt", cfg.append_system_prompt]
         for d in cfg.add_dirs:
             cmd += ["--add-dir", d]
         # ``--mcp-config`` and ``--add-dir`` are declared as variadic in the

@@ -67,6 +67,36 @@ _server_inflight: list[int] = [0]
 _inflight_lock = asyncio.Lock()
 
 
+def _build_memory_system_prompt(db, user_id: str) -> str | None:
+    """Format the user's memory facts into an appended system prompt.
+
+    Returns ``None`` when there are no facts, which the adapter treats as
+    "don't add the flag" — avoiding an empty-string prompt that would
+    still cost a token on every turn. Ordering is newest-first (matches
+    the UI) so recent edits get stronger priority in the model's
+    attention.
+    """
+    rows = db.list_memory_facts_for_user(user_id)
+    if not rows:
+        return None
+    # Keep each line compact; the prompt is passed as a single argv
+    # argument and CC argv is bounded by ARG_MAX. A dozen short facts is
+    # ~1KB — well under the ~256KB ARG_MAX limit on macOS — but we still
+    # truncate each fact to 800 chars defensively.
+    lines: list[str] = []
+    for r in rows:
+        content = r.content.strip().replace("\n", " ")
+        if len(content) > 800:
+            content = content[:800] + "…"
+        lines.append(f"- {content}")
+    joined = "\n".join(lines)
+    return (
+        "User memory (facts this user has asked you to remember across "
+        "conversations). Treat these as persistent context:\n\n"
+        f"{joined}"
+    )
+
+
 def _derive_title(prompt: str, *, max_chars: int = 80) -> str:
     """Produce a human-readable thread title from the first user prompt.
 
@@ -237,6 +267,12 @@ async def send_message(
         # and row with default_model IS NULL both yield None here, so neither
         # the adapter nor CC gets a model flag — CC picks its own default.
         prefs = db.get_user_prefs(user_id)
+        # Compose the user's memory facts into an appended system prompt so
+        # the agent sees them as persistent context across threads. Facts
+        # are loaded on every spawn (cheap: single indexed SELECT) so edits
+        # made mid-session take effect on the next message without any
+        # caching layer to invalidate.
+        memory_prompt = _build_memory_system_prompt(db, user_id)
         adapter = CCAdapter()
         # Optional wall-clock budget per request, driven by env. Unset →
         # no cap (MVP default — legitimate long runs survive). Tests
@@ -250,6 +286,7 @@ async def send_message(
             add_dirs=[str(thread_root / "uploads")],
             permission_mode="bypassPermissions",
             model=prefs.default_model if prefs else None,
+            append_system_prompt=memory_prompt,
             timeout_seconds=float(timeout_env) if timeout_env else None,
         )
         # Audit: spawn event. build_cmd is pure — calling it twice (here
