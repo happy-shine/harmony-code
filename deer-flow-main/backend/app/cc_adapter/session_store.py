@@ -25,6 +25,7 @@ class Mapping:
     session_id: str | None
     cwd: str
     user_id: str | None
+    title: str | None = None
 
 
 class SessionStore:
@@ -64,9 +65,15 @@ class SessionStore:
                     user_id     TEXT
                 )
             """)
-            # Migrate pre-5.3 DBs that have the table but no user_id column.
+            # Migrate pre-5.3 DBs that have the table but no user_id column,
+            # and pre-title DBs that don't yet carry a display title.
             cols = {row[1] for row in conn.execute("PRAGMA table_info(cc_thread_session)").fetchall()}
-            if "user_id" not in cols:
+            for col_name, col_sql in (
+                ("user_id", "ALTER TABLE cc_thread_session ADD COLUMN user_id TEXT"),
+                ("title", "ALTER TABLE cc_thread_session ADD COLUMN title TEXT"),
+            ):
+                if col_name in cols:
+                    continue
                 # Belt-and-suspenders against a concurrent first-run race:
                 # two workers can both read the pre-migration PRAGMA,
                 # both try to ALTER, and the loser hits "duplicate column
@@ -75,7 +82,7 @@ class SessionStore:
                 # where two ``ensure_schema`` calls overlap on the very
                 # first request against a fresh DB.
                 try:
-                    conn.execute("ALTER TABLE cc_thread_session ADD COLUMN user_id TEXT")
+                    conn.execute(col_sql)
                 except sqlite3.OperationalError as e:
                     if "duplicate column name" not in str(e):
                         raise
@@ -97,7 +104,7 @@ class SessionStore:
     def get(self, thread_id: str) -> Mapping | None:
         with closing(self._conn()) as conn, conn:
             row = conn.execute(
-                "SELECT thread_id, session_id, cwd, user_id FROM cc_thread_session WHERE thread_id=?",
+                "SELECT thread_id, session_id, cwd, user_id, title FROM cc_thread_session WHERE thread_id=?",
                 (thread_id,),
             ).fetchone()
         return Mapping(*row) if row else None
@@ -112,7 +119,7 @@ class SessionStore:
         """
         with closing(self._conn()) as conn, conn:
             rows = conn.execute(
-                "SELECT thread_id, session_id, cwd, user_id FROM cc_thread_session WHERE user_id = ?",
+                "SELECT thread_id, session_id, cwd, user_id, title FROM cc_thread_session WHERE user_id = ?",
                 (user_id,),
             ).fetchall()
         return [Mapping(*r) for r in rows]
@@ -122,6 +129,18 @@ class SessionStore:
             conn.execute(
                 "UPDATE cc_thread_session SET session_id=? WHERE thread_id=?",
                 (session_id, thread_id),
+            )
+
+    def set_title_if_empty(self, thread_id: str, title: str) -> None:
+        """Set ``title`` only if the row currently has no title — first prompt wins.
+
+        Idempotent: subsequent calls on the same thread are no-ops, so the
+        caller can trigger this from every ``POST /messages`` handler
+        without tracking state."""
+        with closing(self._conn()) as conn, conn:
+            conn.execute(
+                "UPDATE cc_thread_session SET title=? WHERE thread_id=? AND (title IS NULL OR title = '')",
+                (title, thread_id),
             )
 
     def delete(self, thread_id: str) -> None:

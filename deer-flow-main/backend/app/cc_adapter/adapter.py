@@ -33,7 +33,18 @@ class CCAdapter:
     )
 
     def build_cmd(self, cfg: SpawnConfig) -> list[str]:
-        cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", cfg.permission_mode]
+        # ``--include-partial-messages`` makes CC emit token-by-token
+        # assistant deltas instead of one frame per completed message.
+        # Without it, a long reply appears in the UI only after generation
+        # finishes — defeating the whole point of an SSE pipeline.
+        cmd = [
+            "claude",
+            "-p",
+            "--output-format", "stream-json",
+            "--include-partial-messages",
+            "--verbose",
+            "--permission-mode", cfg.permission_mode,
+        ]
         if cfg.resume_session_id:
             cmd += ["--resume", cfg.resume_session_id]
         if cfg.mcp_config_path:

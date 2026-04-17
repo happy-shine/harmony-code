@@ -74,6 +74,41 @@ export type CCAdapterEvent = {
 };
 
 // ---------------------------------------------------------------------------
+// Streaming deltas (emitted when ``--include-partial-messages`` is set on
+// the CLI). The shape mirrors Anthropic's Messages API streaming events
+// nested under a ``stream_event`` envelope.
+// ---------------------------------------------------------------------------
+
+export type CCStreamEvent = {
+  type: "stream_event";
+  event:
+    | {
+        type: "message_start";
+        message: { id: string; model?: string };
+      }
+    | {
+        type: "content_block_start";
+        index: number;
+        content_block:
+          | { type: "text"; text: string }
+          | { type: "thinking"; thinking: string }
+          | { type: "tool_use"; id: string; name: string; input: unknown };
+      }
+    | {
+        type: "content_block_delta";
+        index: number;
+        delta:
+          | { type: "text_delta"; text: string }
+          | { type: "thinking_delta"; thinking: string }
+          | { type: "input_json_delta"; partial_json: string };
+      }
+    | { type: "content_block_stop"; index: number }
+    | { type: "message_delta"; delta: { stop_reason?: string } }
+    | { type: "message_stop" };
+  parent_tool_use_id?: string | null;
+};
+
+// ---------------------------------------------------------------------------
 // Union — all recognized events plus catch-all for unknown frame types
 // ---------------------------------------------------------------------------
 
@@ -83,4 +118,5 @@ export type StreamEvent =
   | CCSystemInitEvent
   | CCResultEvent
   | CCAdapterEvent
+  | CCStreamEvent
   | { type: string; [key: string]: unknown };

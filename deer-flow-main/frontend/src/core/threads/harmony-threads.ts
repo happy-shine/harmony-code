@@ -27,6 +27,7 @@ import {
 
 export interface HarmonyThread {
   id: string;
+  title: string | null;
   updated_at: string | null;
   has_session: boolean;
 }

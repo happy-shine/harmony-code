@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { FolderIcon } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -60,6 +61,7 @@ export default function CCChatPage() {
   const creatingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const qc = useQueryClient();
 
   // Hook uses the current threadId. When threadId is null (new thread) we
   // pass an empty string; the hook's `send` won't be called until threadId
@@ -74,6 +76,17 @@ export default function CCChatPage() {
     });
   }, [stream.messages, stream.status]);
 
+  // Refresh the sidebar whenever a stream completes — the server captures
+  // the thread's friendly title on the first prompt, so the row written at
+  // `createThread` time starts out title-less and only gains one after the
+  // POST /messages handler runs. Re-invalidating on idle is cheap (one
+  // JSON list request) and keeps the sidebar in sync without extra plumbing.
+  useEffect(() => {
+    if (stream.status === "idle") {
+      void qc.invalidateQueries({ queryKey: ["harmony-threads"] });
+    }
+  }, [stream.status, qc]);
+
   // --- New-thread creation ------------------------------------------------
   const createThread = useCallback(async (): Promise<string> => {
     const r = await fetch("/api/threads", {
@@ -85,8 +98,10 @@ export default function CCChatPage() {
     setThreadId(data.id);
     // Update URL without triggering a Next.js navigation (avoids remount)
     history.replaceState(null, "", `/workspace/chats/${data.id}`);
+    // Refresh the sidebar / Chats list so the new thread appears immediately.
+    void qc.invalidateQueries({ queryKey: ["harmony-threads"] });
     return data.id;
-  }, []);
+  }, [qc]);
 
   // When threadId becomes available and there is a pending message, fire
   // `send`. This avoids the stale-closure problem: after `setThreadId` the

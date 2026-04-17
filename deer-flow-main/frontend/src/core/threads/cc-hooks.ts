@@ -32,6 +32,13 @@ export function useThreadStream(threadId: string) {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Echo the user bubble locally — the gateway does not echo a
+      // user-turn frame for the prompt itself, so without this the
+      // transcript would jump straight from the previous turn to the
+      // new assistant reply.
+      const userMsgId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      dispatch({ type: "add_user_message", id: userMsgId, text: content, attachments } as Action);
+
       setStatus("running");
       setError(null);
       try {

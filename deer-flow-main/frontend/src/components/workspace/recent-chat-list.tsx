@@ -90,10 +90,11 @@ export function RecentChatList() {
                   <SidebarMenuButton isActive={isActive} asChild>
                     <div>
                       <Link
-                        className="text-muted-foreground block w-full whitespace-nowrap font-mono text-xs group-hover/side-menu-item:overflow-hidden"
+                        className="text-muted-foreground block w-full truncate whitespace-nowrap text-sm group-hover/side-menu-item:overflow-hidden"
                         href={href}
+                        title={thread.title ?? thread.id}
                       >
-                        {thread.id}
+                        {thread.title ?? "New chat"}
                       </Link>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>

@@ -95,6 +95,40 @@ def test_list_threads_returns_only_callers_rows(client):
     assert ids == {b1}
 
 
+def test_derive_title_collapses_whitespace_and_truncates():
+    from app.gateway.routers.messages import _derive_title
+
+    # Short prompt round-trips verbatim (with whitespace collapsed).
+    assert _derive_title("Hello   world") == "Hello world"
+    # Empty / whitespace-only falls back to a nonempty placeholder.
+    assert _derive_title("") == "New chat"
+    assert _derive_title("   \n  ") == "New chat"
+    # Long prompt truncates on a word boundary with ellipsis.
+    long_prompt = "This is a long prompt " * 10
+    title = _derive_title(long_prompt, max_chars=30)
+    assert title.endswith("…")
+    assert len(title) <= 31  # 30 + single-char ellipsis
+    # Unbreakable long token still truncates (no room for a word cut).
+    assert _derive_title("x" * 200, max_chars=10) == "xxxxxxxxxx…"
+
+
+def test_set_title_if_empty_is_first_write_wins(tmp_path):
+    """The title must be captured once — subsequent sends don't rewrite it,
+    so the sidebar stays anchored to the opening question."""
+    from app.cc_adapter.session_store import SessionStore
+
+    db_path = str(tmp_path / "s.db")
+    s = SessionStore(db_path)
+    s.ensure_schema()
+    s.create("t_x", "/tmp", user_id="u_alice")
+
+    s.set_title_if_empty("t_x", "First question")
+    assert s.get("t_x").title == "First question"
+    # Second call is a no-op.
+    s.set_title_if_empty("t_x", "Second message")
+    assert s.get("t_x").title == "First question"
+
+
 def test_list_threads_empty_list_when_no_rows(client):
     c, _ = client
     _login_as("u_fresh")
@@ -117,6 +151,10 @@ def test_list_threads_shape_has_id_and_updated_at(client):
     assert row["updated_at"] is not None
     assert "T" in row["updated_at"]
     assert row["has_session"] is False
+    # title is null until the first user message lands and
+    # ``set_title_if_empty`` populates it. The frontend falls back to
+    # "New chat" for null-title rows.
+    assert row["title"] is None
 
 
 def test_delete_thread_removes_from_list(client):

@@ -17,6 +17,7 @@ import type {
   CCAssistantEvent,
   CCBlock,
   CCResultEvent,
+  CCStreamEvent,
   CCSystemInitEvent,
   CCUserEvent,
   StreamEvent,
@@ -76,17 +77,25 @@ export type MessageState = {
   messages: UIMessage[];
   todos: Todo[];
   result: ResultState | null;
+  // ID of the assistant message currently being streamed into (populated
+  // on ``message_start``, cleared on ``message_stop``). Used so delta
+  // frames don't need to hunt for the right message when multiple are in
+  // the transcript.
+  streamingMessageId: string | null;
 };
 
 export function initialMessageState(): MessageState {
-  return { messages: [], todos: [], result: null };
+  return { messages: [], todos: [], result: null, streamingMessageId: null };
 }
 
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
 
-export type Action = { type: "ingest"; event: StreamEvent } | { type: "reset" };
+export type Action =
+  | { type: "ingest"; event: StreamEvent }
+  | { type: "reset" }
+  | { type: "add_user_message"; id: string; text: string; attachments?: string[] };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -327,6 +336,138 @@ function handleUser(state: MessageState, evt: CCUserEvent): MessageState {
   return { ...state, messages: newMessages };
 }
 
+function handleStreamEvent(
+  state: MessageState,
+  evt: CCStreamEvent,
+): MessageState {
+  const e = evt.event;
+
+  if (e.type === "message_start") {
+    // Open a new streaming assistant message. Guard against duplicate
+    // starts (re-renders, reconnects) by checking whether a message with
+    // this id already exists.
+    const id = e.message.id;
+    if (state.messages.some((m) => m.kind === "assistant" && m.id === id)) {
+      return { ...state, streamingMessageId: id };
+    }
+    const msg: UIMessage = { kind: "assistant", id, blocks: [] };
+    return {
+      ...state,
+      messages: [...state.messages, msg],
+      streamingMessageId: id,
+    };
+  }
+
+  if (e.type === "content_block_start") {
+    const id = state.streamingMessageId;
+    if (!id) return state;
+    const idx = state.messages.findIndex(
+      (m) => m.kind === "assistant" && m.id === id,
+    );
+    if (idx < 0) return state;
+    const existing = state.messages[idx];
+    if (!existing || existing.kind !== "assistant") return state;
+    const cb = e.content_block;
+    // Initialize the appropriate UIBlock. Non-text/thinking/tool_use
+    // blocks are ignored — the full-message ``assistant`` frame at the
+    // end will fill in anything we miss.
+    let uib: UIBlock | undefined;
+    if (cb.type === "text") {
+      uib = { kind: "text", text: cb.text, streaming: true };
+    } else if (cb.type === "thinking") {
+      uib = {
+        kind: "thinking",
+        text: cb.thinking,
+        streaming: true,
+        expanded: false,
+      };
+    } else if (cb.type === "tool_use") {
+      uib = {
+        kind: "tool_use",
+        id: cb.id,
+        name: cb.name,
+        input: cb.input,
+        status: "running",
+      };
+    }
+    if (!uib) return state;
+    // Place at `index` (padding with undefined-collapsed slots if the
+    // server skipped an index, which shouldn't happen in practice).
+    const blocks = [...existing.blocks];
+    blocks[e.index] = uib;
+    const updated: UIMessage = { ...existing, blocks: blocks.filter(Boolean) as UIBlock[] };
+    const messages = [...state.messages];
+    messages[idx] = updated;
+    return { ...state, messages };
+  }
+
+  if (e.type === "content_block_delta") {
+    const id = state.streamingMessageId;
+    if (!id) return state;
+    const idx = state.messages.findIndex(
+      (m) => m.kind === "assistant" && m.id === id,
+    );
+    if (idx < 0) return state;
+    const existing = state.messages[idx];
+    if (!existing || existing.kind !== "assistant") return state;
+    // Append the delta to the block at `index`. Text and thinking deltas
+    // are additive strings; input_json_delta for tool_use is best handled
+    // by the final ``assistant`` frame overwriting with the parsed input
+    // (partial JSON is painful to apply incrementally).
+    const blocks = [...existing.blocks];
+    const target = blocks[e.index];
+    if (!target) return state;
+    if (e.delta.type === "text_delta" && target.kind === "text") {
+      blocks[e.index] = { ...target, text: target.text + e.delta.text };
+    } else if (
+      e.delta.type === "thinking_delta" &&
+      target.kind === "thinking"
+    ) {
+      blocks[e.index] = {
+        ...target,
+        text: target.text + e.delta.thinking,
+      };
+    } else {
+      return state;
+    }
+    const updated: UIMessage = { ...existing, blocks };
+    const messages = [...state.messages];
+    messages[idx] = updated;
+    return { ...state, messages };
+  }
+
+  if (e.type === "content_block_stop") {
+    // Mark the streaming block as no-longer-streaming so the UI caret
+    // stops blinking. Other fields are untouched; the terminal
+    // ``assistant`` frame will supply the authoritative final content.
+    const id = state.streamingMessageId;
+    if (!id) return state;
+    const idx = state.messages.findIndex(
+      (m) => m.kind === "assistant" && m.id === id,
+    );
+    if (idx < 0) return state;
+    const existing = state.messages[idx];
+    if (!existing || existing.kind !== "assistant") return state;
+    const blocks = [...existing.blocks];
+    const target = blocks[e.index];
+    if (target && (target.kind === "text" || target.kind === "thinking")) {
+      blocks[e.index] = { ...target, streaming: false };
+      const updated: UIMessage = { ...existing, blocks };
+      const messages = [...state.messages];
+      messages[idx] = updated;
+      return { ...state, messages };
+    }
+    return state;
+  }
+
+  if (e.type === "message_stop") {
+    return { ...state, streamingMessageId: null };
+  }
+
+  // message_delta and anything else we don't care about.
+  return state;
+}
+
 // ---------------------------------------------------------------------------
 // Reducer
 // ---------------------------------------------------------------------------
@@ -337,6 +478,25 @@ export function messageReducer(
 ): MessageState {
   if (action.type === "reset") {
     return initialMessageState();
+  }
+
+  if (action.type === "add_user_message") {
+    // Echo the user's own turn into the transcript. The gateway does not
+    // emit a back-channel ``user`` frame for the prompt itself — only for
+    // tool_result backfill — so we synthesize one here, keyed by id so
+    // repeated dispatch is a no-op.
+    if (state.messages.some((m) => m.kind === "user" && m.id === action.id)) {
+      return state;
+    }
+    const msg: UIMessage = {
+      kind: "user",
+      id: action.id,
+      text: action.text,
+      attachments: action.attachments ?? [],
+    };
+    // Also clear any prior result footer so it doesn't linger from the
+    // previous turn above the new user bubble.
+    return { ...state, messages: [...state.messages, msg], result: null };
   }
 
   const { event } = action;
@@ -356,6 +516,9 @@ export function messageReducer(
 
     case "user":
       return handleUser(state, event as CCUserEvent);
+
+    case "stream_event":
+      return handleStreamEvent(state, event as CCStreamEvent);
 
     default:
       // _adapter, hooks, unknown — ignore

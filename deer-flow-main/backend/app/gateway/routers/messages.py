@@ -67,6 +67,25 @@ _server_inflight: list[int] = [0]
 _inflight_lock = asyncio.Lock()
 
 
+def _derive_title(prompt: str, *, max_chars: int = 80) -> str:
+    """Produce a human-readable thread title from the first user prompt.
+
+    Collapses whitespace, strips, and truncates on a word boundary with a
+    trailing ellipsis when too long. Falls back to a nonempty placeholder
+    if the prompt is all whitespace (the UI never shows an empty title).
+    """
+    collapsed = " ".join(prompt.split())
+    if not collapsed:
+        return "New chat"
+    if len(collapsed) <= max_chars:
+        return collapsed
+    # Cut at the last space within the budget so we don't slice mid-word.
+    cut = collapsed[:max_chars].rsplit(" ", 1)[0]
+    if not cut:
+        cut = collapsed[:max_chars]
+    return f"{cut}…"
+
+
 async def _release_admission(tid: str, user_id: str) -> None:
     """Release per-thread + per-user + server-wide slots.
 
@@ -122,6 +141,7 @@ def list_threads(user_id: str = Depends(current_user_id)) -> dict:
         out.append(
             {
                 "id": r.thread_id,
+                "title": r.title,
                 "updated_at": datetime.fromtimestamp(ts, UTC).isoformat() if ts else None,
                 "has_session": r.session_id is not None,
             }
@@ -199,6 +219,11 @@ async def send_message(
     # never fires — so we must release ``_inflight`` ourselves, otherwise
     # the thread is wedged at 409 until server restart.
     try:
+        # Capture a friendly display title on the first prompt (idempotent
+        # — subsequent sends are no-ops). Keeps the sidebar/Chats list
+        # readable for non-technical users; the raw thread_id is useless
+        # at a glance.
+        store.set_title_if_empty(tid, _derive_title(body.content))
         data_dir = _data_dir()
         tmp_root = data_dir / "tmp"
         tmp_root.mkdir(parents=True, exist_ok=True)

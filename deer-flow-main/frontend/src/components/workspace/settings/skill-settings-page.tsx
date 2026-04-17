@@ -23,15 +23,19 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useI18n } from "@/core/i18n/hooks";
-import { useEnableSkill, useSkills } from "@/core/skills/hooks";
-import type { Skill } from "@/core/skills/type";
-import { env } from "@/env";
+import {
+  useHarmonySkills,
+  useToggleHarmonySkill,
+  type HarmonySkill,
+} from "@/core/skills/harmony-skills";
 
 import { SettingsSection } from "./settings-section";
 
+type SkillFilter = "custom" | "public";
+
 export function SkillSettingsPage({ onClose }: { onClose?: () => void } = {}) {
   const { t } = useI18n();
-  const { skills, isLoading, error } = useSkills();
+  const { data: skills, isLoading, error } = useHarmonySkills();
   return (
     <SettingsSection
       title={t.settings.skills.title}
@@ -40,9 +44,11 @@ export function SkillSettingsPage({ onClose }: { onClose?: () => void } = {}) {
       {isLoading ? (
         <div className="text-muted-foreground text-sm">{t.common.loading}</div>
       ) : error ? (
-        <div>Error: {error.message}</div>
+        <div className="text-sm text-red-500">
+          Error: {error instanceof Error ? error.message : String(error)}
+        </div>
       ) : (
-        <SkillSettingsList skills={skills} onClose={onClose} />
+        <SkillSettingsList skills={skills ?? []} onClose={onClose} />
       )}
     </SettingsSection>
   );
@@ -52,29 +58,39 @@ function SkillSettingsList({
   skills,
   onClose,
 }: {
-  skills: Skill[];
+  skills: HarmonySkill[];
   onClose?: () => void;
 }) {
   const { t } = useI18n();
   const router = useRouter();
-  const [filter, setFilter] = useState<string>("public");
-  const { mutate: enableSkill } = useEnableSkill();
-  const filteredSkills = useMemo(
-    () => skills.filter((skill) => skill.category === filter),
-    [skills, filter],
-  );
+  const [filter, setFilter] = useState<SkillFilter>("custom");
+  const { mutate: toggle, isPending } = useToggleHarmonySkill();
+
+  const filteredSkills = useMemo(() => {
+    // "public" = global rows (user_id IS NULL, shared across users).
+    // "custom" = rows owned by the caller. This split replaces deer-flow's
+    // ``skill.category`` which the harmony backend doesn't carry.
+    return skills.filter((s) =>
+      filter === "public" ? s.user_id === null : s.user_id !== null,
+    );
+  }, [skills, filter]);
+
   const handleCreateSkill = () => {
     onClose?.();
     router.push("/workspace/chats/new?mode=skill");
   };
+
   return (
     <div className="flex w-full flex-col gap-4">
       <header className="flex justify-between">
         <div className="flex gap-2">
-          <Tabs defaultValue="public" onValueChange={setFilter}>
+          <Tabs
+            defaultValue="custom"
+            onValueChange={(v) => setFilter(v as SkillFilter)}
+          >
             <TabsList variant="line">
-              <TabsTrigger value="public">{t.common.public}</TabsTrigger>
               <TabsTrigger value="custom">{t.common.custom}</TabsTrigger>
+              <TabsTrigger value="public">{t.common.public}</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -89,27 +105,41 @@ function SkillSettingsList({
         <EmptySkill onCreateSkill={handleCreateSkill} />
       )}
       {filteredSkills.length > 0 &&
-        filteredSkills.map((skill) => (
-          <Item className="w-full" variant="outline" key={skill.name}>
-            <ItemContent>
-              <ItemTitle>
-                <div className="flex items-center gap-2">{skill.name}</div>
-              </ItemTitle>
-              <ItemDescription className="line-clamp-4">
-                {skill.description}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Switch
-                checked={skill.enabled}
-                disabled={env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY === "true"}
-                onCheckedChange={(checked) =>
-                  enableSkill({ skillName: skill.name, enabled: checked })
-                }
-              />
-            </ItemActions>
-          </Item>
-        ))}
+        filteredSkills.map((skill) => {
+          const readOnly = skill.user_id === null;
+          return (
+            <Item className="w-full" variant="outline" key={skill.id}>
+              <ItemContent>
+                <ItemTitle>
+                  <div className="flex items-center gap-2">
+                    {skill.name}
+                    {readOnly ? (
+                      <span className="text-muted-foreground text-xs">
+                        (global · read-only)
+                      </span>
+                    ) : null}
+                  </div>
+                </ItemTitle>
+                <ItemDescription className="line-clamp-4">
+                  {skill.source === "upload"
+                    ? "Installed from upload"
+                    : skill.source === "git"
+                      ? "Installed from git"
+                      : skill.source}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Switch
+                  checked={skill.enabled}
+                  disabled={readOnly || isPending}
+                  onCheckedChange={(checked) =>
+                    toggle({ id: skill.id, enabled: checked })
+                  }
+                />
+              </ItemActions>
+            </Item>
+          );
+        })}
     </div>
   );
 }

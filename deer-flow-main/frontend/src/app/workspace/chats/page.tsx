@@ -30,9 +30,10 @@ import type { HarmonyThread } from "@/core/threads/harmony-threads";
 import { formatTimeAgo } from "@/core/utils/datetime";
 
 function titleOfHarmonyThread(t: HarmonyThread): string {
-  // Backend doesn't carry a title yet (M-future). Falling back to the
-  // thread id keeps the list navigable without pretending we have one.
-  return t.id;
+  // Backend captures the first user prompt as the thread title at send
+  // time. Until the first message lands, the row has no title — show
+  // "New chat" so the list stays readable without exposing the raw id.
+  return t.title ?? "New chat";
 }
 
 export default function ChatsPage() {
@@ -99,7 +100,7 @@ export default function ChatsPage() {
                     href={`/workspace/chats/${thread.id}`}
                   >
                     <div className="flex flex-col gap-2 border-b p-4 hover:bg-neutral-50 dark:hover:bg-neutral-900">
-                      <div className="font-mono text-sm">
+                      <div className="truncate text-sm">
                         {titleOfHarmonyThread(thread)}
                       </div>
                       {thread.updated_at && (
