@@ -81,12 +81,21 @@ export async function POST(
   // Explicitly set SSE-friendly headers so no intermediary decides to
   // buffer — ``X-Accel-Buffering: no`` is the nginx-ism;
   // ``Cache-Control: no-transform`` keeps CDNs from re-encoding the
-  // stream; ``Content-Type: text/event-stream`` is the authoritative type.
+  // stream; ``Content-Type: text/event-stream`` is the authoritative
+  // type. ``Content-Encoding: identity`` is the critical one: Next.js's
+  // dev server otherwise gzips every response whose client sent
+  // ``Accept-Encoding: gzip`` (which every browser does). Gzip has to
+  // accumulate bytes before emitting a compressed frame, so per-token
+  // SSE deltas get buffered inside the compressor and land all at once
+  // at stream close — the user sees a dead pause then everything pops
+  // in. Declaring ``identity`` tells the compression middleware the
+  // body is already in its final encoding.
   const respHeaders = new Headers();
   respHeaders.set("Content-Type", upstream.headers.get("content-type") ?? "text/event-stream");
   respHeaders.set("Cache-Control", "no-cache, no-transform");
   respHeaders.set("Connection", "keep-alive");
   respHeaders.set("X-Accel-Buffering", "no");
+  respHeaders.set("Content-Encoding", "identity");
 
   return new Response(out, {
     status: upstream.status,

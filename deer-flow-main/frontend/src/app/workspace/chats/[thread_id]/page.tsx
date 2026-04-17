@@ -43,10 +43,11 @@ function UserBubble({ text }: { text: string }) {
   // Same side as assistant replies (left-aligned), muted light-blue pill
   // instead of the saturated high-contrast bubble — mirrors modern chat
   // UIs (Claude.ai, Linear) where the user's turn is a calm accent, not a
-  // shouty block.
+  // shouty block. Extra vertical margin marks a turn boundary so the
+  // prompt doesn't visually merge with the assistant reply above / below.
   return (
-    <div className="flex">
-      <div className="max-w-full whitespace-pre-wrap rounded-lg bg-blue-50 px-3 py-2 text-sm text-neutral-800 dark:bg-blue-950/40 dark:text-neutral-100">
+    <div className="my-6 flex">
+      <div className="max-w-full whitespace-pre-wrap rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
         {text}
       </div>
     </div>
@@ -229,6 +230,12 @@ export default function CCChatPage() {
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text) return;
+    // Let the user keep typing while a reply streams, but block sending
+    // a second turn — the gateway admits only one in-flight stream per
+    // thread (409 otherwise) and our own ``send`` would abort the live
+    // one. The user sees "Stop" instead of "Send" during streaming,
+    // which already communicates this.
+    if (stream.status === "running") return;
     setInput("");
 
     if (!threadId) {
@@ -396,8 +403,7 @@ export default function CCChatPage() {
               composingRef.current = false;
             }}
             placeholder="Type a message..."
-            disabled={stream.status === "running"}
-            className="flex-1 rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 dark:border-neutral-700"
+            className="flex-1 rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-neutral-700"
             autoFocus
           />
           {stream.status === "running" ? (

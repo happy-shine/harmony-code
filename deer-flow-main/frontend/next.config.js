@@ -21,6 +21,16 @@ const config = {
     defaultLocale: "en",
   },
   devIndicators: false,
+  // Disable built-in gzip so ``/api/threads/{tid}/messages`` SSE streams
+  // arrive with real per-token cadence instead of being buffered inside
+  // the compressor. gzip has to accumulate bytes before producing an
+  // output frame, so a series of 30-byte ``content_block_delta`` events
+  // emitted 400ms apart would otherwise land at the client in one burst
+  // at stream close — the user sees a dead pause then the whole reply
+  // pops in. Static assets ship from the Turbopack dev server with
+  // their own transfer encoding, so turning this off has no measurable
+  // impact on page-load perf.
+  compress: false,
   async rewrites() {
     // Single catch-all: forward every /api/* request to the harmony-code
     // gateway. The old per-endpoint rewrites (langgraph / agents / threads)

@@ -166,25 +166,43 @@ function extractTodos(input: unknown): Todo[] {
  * the same message.id, so the new array is authoritative. However we must
  * preserve any `status`/`result` data we previously backfilled onto tool_use
  * blocks from user tool_result events.
+ *
+ * We also preserve ``streaming: false`` once a block has been marked done
+ * by a ``content_block_stop`` event. Otherwise the terminal ``assistant``
+ * frame (which often arrives with ``stop_reason: null`` because the real
+ * stop_reason lives in ``message_delta``) would flip the block back to
+ * ``streaming: true`` and leave the "▌" caret blinking forever.
  */
 function mergeBlocks(prev: UIBlock[], next: UIBlock[]): UIBlock[] {
-  // Build a lookup of previously-backfilled tool_use data by id
   const prevToolData = new Map<
     string,
     { status: "running" | "ok" | "error"; result?: unknown }
   >();
-  for (const b of prev) {
+  const prevDoneStreaming = new Map<number, boolean>();
+  for (const [i, b] of prev.entries()) {
     if (b.kind === "tool_use" && b.status !== "running") {
       prevToolData.set(b.id, { status: b.status, result: b.result });
     }
+    if (
+      (b.kind === "text" || b.kind === "thinking") &&
+      b.streaming === false
+    ) {
+      prevDoneStreaming.set(i, true);
+    }
   }
 
-  return next.map((b) => {
+  return next.map((b, i) => {
     if (b.kind === "tool_use") {
       const existing = prevToolData.get(b.id);
       if (existing) {
         return { ...b, status: existing.status, result: existing.result };
       }
+    }
+    if (
+      (b.kind === "text" || b.kind === "thinking") &&
+      prevDoneStreaming.get(i)
+    ) {
+      return { ...b, streaming: false };
     }
     return b;
   });

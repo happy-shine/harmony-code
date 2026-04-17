@@ -106,12 +106,19 @@ function statusLabel(status: string): string {
 
 function StatusIcon({ status }: { status: string }) {
   if (status === "ok")
-    return <CheckCircle2 className="size-4 text-neutral-400" strokeWidth={1.5} />;
+    return (
+      <CheckCircle2
+        className="size-3.5 shrink-0 text-neutral-400"
+        strokeWidth={1.5}
+      />
+    );
   if (status === "error")
-    return <XCircle className="size-4 text-red-500" strokeWidth={1.5} />;
+    return (
+      <XCircle className="size-3.5 shrink-0 text-red-500" strokeWidth={1.5} />
+    );
   return (
     <LoaderIcon
-      className="size-4 animate-spin text-amber-500"
+      className="size-3.5 shrink-0 animate-spin text-amber-500"
       strokeWidth={1.5}
     />
   );
@@ -135,10 +142,15 @@ export function ToolUseBlock({ block }: { block: ToolUseBlockType }) {
   const status = block.status;
   const isError = status === "error";
 
+  // Only show the status sub-label when it adds information ("Running…"
+  // or "Failed"). A green check beside "Completed" is redundant and
+  // doubles the card height for the common case.
+  const showSubLabel = status !== "ok";
+
   return (
     <div
       className={
-        "my-1.5 overflow-hidden rounded-lg border text-sm transition-colors " +
+        "my-0.5 overflow-hidden rounded-md border text-sm transition-colors " +
         (isError
           ? "border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-950/20"
           : "border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900/40")
@@ -147,26 +159,26 @@ export function ToolUseBlock({ block }: { block: ToolUseBlockType }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-neutral-100/60 dark:hover:bg-neutral-800/40"
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-neutral-100/60 dark:hover:bg-neutral-800/40"
         aria-expanded={open}
       >
         <ChevronRight
-          size={14}
+          size={12}
           className={
             "shrink-0 text-neutral-400 transition-transform " +
             (open ? "rotate-90" : "")
           }
         />
         <StatusIcon status={status} />
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-medium text-neutral-800 dark:text-neutral-100">
-            {title}
-          </div>
-          <div className="truncate text-xs text-neutral-500 dark:text-neutral-400">
-            {statusLabel(status)}
-          </div>
-        </div>
-        <span className="shrink-0 rounded-md bg-neutral-200/70 px-2 py-0.5 font-mono text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+        <span className="min-w-0 flex-1 truncate text-neutral-800 dark:text-neutral-100">
+          {title}
+          {showSubLabel && (
+            <span className="ml-2 text-xs text-neutral-400 dark:text-neutral-500">
+              {statusLabel(status)}
+            </span>
+          )}
+        </span>
+        <span className="shrink-0 rounded bg-neutral-200/70 px-1.5 py-0.5 font-mono text-[11px] text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
           {kindLabel(block.name)}
         </span>
       </button>
