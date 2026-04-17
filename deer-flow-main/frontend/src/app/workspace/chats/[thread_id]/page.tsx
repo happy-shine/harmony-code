@@ -76,7 +76,10 @@ export default function CCChatPage() {
 
   // --- New-thread creation ------------------------------------------------
   const createThread = useCallback(async (): Promise<string> => {
-    const r = await fetch("/api/threads", { method: "POST" });
+    const r = await fetch("/api/threads", {
+      method: "POST",
+      credentials: "include",
+    });
     if (!r.ok) throw new Error(`Create thread failed: ${r.status}`);
     const data = (await r.json()) as { id: string };
     setThreadId(data.id);

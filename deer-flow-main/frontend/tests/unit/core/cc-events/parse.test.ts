@@ -41,6 +41,33 @@ describe("parseSSEFrame", () => {
 });
 
 describe("drainSSE", () => {
+  it("yields frames separated by CRLF (sse-starlette's default)", async () => {
+    // sse-starlette emits "\r\n\r\n" between frames. The parser must treat
+    // CRLF-separated frames identically to LF-separated frames.
+    const body = new TextEncoder().encode(
+      'data: {"type":"system","subtype":"init","session_id":"s1"}\r\n\r\n' +
+        'data: {"type":"assistant","message":{"id":"m1"}}\r\n\r\n' +
+        "event: done\r\ndata: {}\r\n\r\n",
+    );
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(body);
+        controller.close();
+      },
+    });
+
+    const frames: ParsedFrame[] = [];
+    for await (const f of drainSSE(stream)) {
+      frames.push(f);
+    }
+
+    expect(frames.map((f) => f.kind)).toEqual(["data", "data", "done"]);
+    if (frames[0]?.kind === "data") expect(frames[0].event.type).toBe("system");
+    if (frames[1]?.kind === "data")
+      expect(frames[1].event.type).toBe("assistant");
+  });
+
   it("yields frames from a ReadableStream, handling chunk boundaries", async () => {
     // Two chunks that split mid-frame
     const chunk1 = new TextEncoder().encode(

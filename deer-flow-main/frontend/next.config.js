@@ -22,50 +22,33 @@ const config = {
   },
   devIndicators: false,
   async rewrites() {
-    const rewrites = [];
-    const langgraphURL = getInternalServiceURL(
-      "DEER_FLOW_INTERNAL_LANGGRAPH_BASE_URL",
-      "http://127.0.0.1:2024",
-    );
+    // Single catch-all: forward every /api/* request to the harmony-code
+    // gateway. The old per-endpoint rewrites (langgraph / agents / threads)
+    // are dead — LangGraph is gone (M5), and a catch-all covers the M3+
+    // routers (auth, skills, mcp, workspace, uploads, threads, ...).
+    //
+    // Any Next.js local routes under src/app/api/** take precedence over
+    // rewrites by default (afterFiles), so if we ever want to intercept a
+    // path in-process, drop a route.ts there. For the MVP, everything
+    // /api/* goes straight to the Python backend.
     const gatewayURL = getInternalServiceURL(
       "DEER_FLOW_INTERNAL_GATEWAY_BASE_URL",
-      "http://127.0.0.1:8001",
+      "http://127.0.0.1:8000",
     );
 
-    if (!process.env.NEXT_PUBLIC_LANGGRAPH_BASE_URL) {
-      rewrites.push({
-        source: "/api/langgraph",
-        destination: langgraphURL,
-      });
-      rewrites.push({
-        source: "/api/langgraph/:path*",
-        destination: `${langgraphURL}/:path*`,
-      });
+    // When NEXT_PUBLIC_BACKEND_BASE_URL is set, the client hits the backend
+    // directly (no same-origin rewrite needed), so skip registering the
+    // rewrite to avoid a redundant hop.
+    if (process.env.NEXT_PUBLIC_BACKEND_BASE_URL) {
+      return [];
     }
 
-    if (!process.env.NEXT_PUBLIC_BACKEND_BASE_URL) {
-      rewrites.push({
-        source: "/api/agents",
-        destination: `${gatewayURL}/api/agents`,
-      });
-      rewrites.push({
-        source: "/api/agents/:path*",
-        destination: `${gatewayURL}/api/agents/:path*`,
-      });
-    }
-
-    if (!process.env.NEXT_PUBLIC_BACKEND_BASE_URL) {
-      rewrites.push({
-        source: "/api/threads",
-        destination: `${gatewayURL}/api/threads`,
-      });
-      rewrites.push({
-        source: "/api/threads/:path*",
-        destination: `${gatewayURL}/api/threads/:path*`,
-      });
-    }
-
-    return rewrites;
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${gatewayURL}/api/:path*`,
+      },
+    ];
   },
 };
 

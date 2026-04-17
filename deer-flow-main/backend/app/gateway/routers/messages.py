@@ -95,6 +95,67 @@ def create_thread(user_id: str = Depends(current_user_id)) -> dict:
     return {"id": tid, "cwd": str(cwd)}
 
 
+@router.get("/threads")
+def list_threads(user_id: str = Depends(current_user_id)) -> dict:
+    """List the caller's threads.
+
+    Returns newest-first by creation time (derived from the thread's
+    cwd mtime, since ``session_store`` doesn't carry a created_at column
+    yet). Response shape::
+
+        { "threads": [ { "id": "t_...", "updated_at": "2026-04-16T..." }, ... ] }
+
+    An ISO-8601 ``updated_at`` keeps the frontend shape stable even though
+    the field is derived on-the-fly. Missing cwds (e.g. directory deleted
+    out-of-band) fall back to 0.0 so the row still appears at the bottom.
+    """
+    from datetime import UTC, datetime
+    from os import stat as _stat
+
+    rows = _store().list_for_user(user_id)
+    out: list[dict] = []
+    for r in rows:
+        try:
+            ts = _stat(r.cwd).st_mtime
+        except OSError:
+            ts = 0.0
+        out.append(
+            {
+                "id": r.thread_id,
+                "updated_at": datetime.fromtimestamp(ts, UTC).isoformat() if ts else None,
+                "has_session": r.session_id is not None,
+            }
+        )
+    # Newest first. ``None`` updated_at sorts last.
+    out.sort(key=lambda d: d["updated_at"] or "", reverse=True)
+    return {"threads": out}
+
+
+@router.delete("/threads/{tid}")
+async def delete_thread(tid: str, user_id: str = Depends(current_user_id)) -> dict:
+    """Delete a thread row.
+
+    Ownership-aware: unknown or not-yours both 404 (same rule as every
+    other ``/api/threads/*`` endpoint). Refuses to delete a thread with
+    an in-flight stream (409) — that would orphan a running CC process
+    and break ``--resume``.
+
+    The cwd directory on disk is deliberately NOT removed — users may
+    have files they want to retrieve out-of-band, and a full reaper is
+    an ops concern (cron, not request path). We just drop the row from
+    ``session_store`` so the thread stops appearing in listings.
+    """
+    store = _store()
+    row = store.get(tid)
+    if row is None or row.user_id != user_id:
+        raise HTTPException(404, "thread_not_found")
+    async with _inflight_lock:
+        if tid in _inflight:
+            raise HTTPException(409, "thread_busy")
+    store.delete(tid)
+    return {"deleted": True, "id": tid}
+
+
 @router.post("/threads/{tid}/messages")
 async def send_message(
     tid: str,

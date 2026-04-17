@@ -26,7 +26,9 @@ export function useThreadStream(threadId: string) {
   const send = useCallback(
     async (content: string, attachments: string[] = []) => {
       // Abort any in-flight stream
-      abortRef.current?.abort();
+      if (abortRef.current) {
+        abortRef.current.abort();
+      }
       const controller = new AbortController();
       abortRef.current = controller;
 

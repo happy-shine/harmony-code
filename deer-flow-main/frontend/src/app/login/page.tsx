@@ -5,8 +5,11 @@
  *
  * Posts to ``/api/auth/sign-in/email`` with ``credentials: "include"`` so
  * the backend's ``harmony_session`` cookie is stored. On success redirects
- * to ``/workspace/chats``. There is deliberately no sign-up link — user
- * creation is admin-CLI-only (``python -m app.admin create-user``).
+ * to ``/workspace/chats/new`` — the main deer-flow chat surface, now
+ * wired to the harmony-code SSE pipeline (``useThreadStream`` in
+ * ``src/core/threads/cc-hooks.ts``). There is deliberately no sign-up
+ * link — user creation is admin-CLI-only
+ * (``python -m app.admin create-user``).
  *
  * UX polish (styling, i18n, error shaping, remember-me, SSO) is M6. The
  * goal here is a page that lets a developer actually use the app after
@@ -41,7 +44,7 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      router.push("/workspace/chats");
+      router.push("/workspace/chats/new");
     } catch (err) {
       setError((err as Error).message || "Network error");
       setLoading(false);

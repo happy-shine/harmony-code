@@ -16,7 +16,14 @@ export async function* openMessageStream(
 ): AsyncGenerator<StreamYield> {
   const resp = await fetch(`/api/threads/${threadId}/messages`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      // Explicit SSE Accept lets any intermediary route the response
+      // verbatim (no buffering / content-negotiation surprises).
+      Accept: "text/event-stream",
+    },
+    cache: "no-store",
+    credentials: "include",
     body: JSON.stringify(payload),
     signal,
   });

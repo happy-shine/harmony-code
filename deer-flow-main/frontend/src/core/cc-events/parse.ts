@@ -21,7 +21,8 @@ export type ParsedFrame =
 export function parseSSEFrame(frame: string): ParsedFrame {
   // Note: Per SSE spec, "data:hello" (no space) is valid. This parser requires
   // "data: " (with space), matching our gateway's output format (sse-starlette).
-  const lines = frame.split("\n");
+  // Lines may be terminated by "\n" or "\r\n" — strip trailing "\r" per-line.
+  const lines = frame.split("\n").map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l));
   let eventName = "";
   const dataLines: string[] = [];
 
@@ -74,6 +75,11 @@ export async function* drainSSE(
       const { done, value } = await reader.read();
       if (done) return;
       buf += dec.decode(value, { stream: true });
+
+      // Normalize CRLF → LF so frame boundary detection works regardless of
+      // the server's line endings. sse-starlette emits "\r\n\r\n" between
+      // frames; splitting on "\n\n" alone would miss those boundaries.
+      buf = buf.replace(/\r\n/g, "\n");
 
       const frames = buf.split("\n\n");
       buf = frames.pop() ?? "";
