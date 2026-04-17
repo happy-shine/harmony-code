@@ -40,9 +40,13 @@ function AssistantMessage({ msg }: { msg: Extract<UIMessage, { kind: "assistant"
 }
 
 function UserBubble({ text }: { text: string }) {
+  // Same side as assistant replies (left-aligned), muted light-blue pill
+  // instead of the saturated high-contrast bubble — mirrors modern chat
+  // UIs (Claude.ai, Linear) where the user's turn is a calm accent, not a
+  // shouty block.
   return (
-    <div className="flex justify-end">
-      <div className="max-w-[80%] rounded-lg bg-blue-600 px-3 py-2 text-sm text-white">
+    <div className="flex">
+      <div className="max-w-full whitespace-pre-wrap rounded-lg bg-blue-50 px-3 py-2 text-sm text-neutral-800 dark:bg-blue-950/40 dark:text-neutral-100">
         {text}
       </div>
     </div>
