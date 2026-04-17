@@ -54,6 +54,21 @@ export function useThreadStream(threadId: string) {
             return;
           }
           dispatch({ type: "ingest", event: ev.event } as Action);
+          // Yield to the browser between per-token deltas so React can
+          // commit + paint each update. Without this, multiple deltas
+          // that arrive in the same microtask (or that are parsed out of
+          // a single fetch chunk) get batched into one commit and the
+          // assistant reply appears to "pop in" in chunks instead of
+          // streaming smoothly. rAF naturally caps re-renders at the
+          // display refresh rate so we don't thrash the DOM at >60Hz.
+          if (
+            ev.event.type === "stream_event" &&
+            typeof requestAnimationFrame !== "undefined"
+          ) {
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => resolve()),
+            );
+          }
         }
         setStatus("idle");
       } catch (e: unknown) {
