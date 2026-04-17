@@ -14,9 +14,23 @@ from .types import SpawnConfig
 class CCAdapter:
     """Stateless adapter — one instance can handle many runs."""
 
-    # Allowlist of env vars passed to CC subprocess
-    ENV_PASSTHROUGH = ("PATH", "HOME", "LANG", "LC_ALL", "TZ")
+    # Allowlist of env vars passed to CC subprocess.
+    # USER/LOGNAME are needed for macOS Keychain fallback — the CLI resolves
+    # the login keychain owner from them.
+    ENV_PASSTHROUGH = ("PATH", "HOME", "LANG", "LC_ALL", "TZ", "USER", "LOGNAME")
     ENV_CLAUDE_PREFIX = "CLAUDE_CODE_"
+    # ``CLAUDE_CODE_*`` vars that encode short-lived OAuth state from a host
+    # launcher (claude-desktop/Claude Code). If the harmony-code backend was
+    # itself spawned inside such a host, these vars are captured at startup
+    # and GO STALE when the host rotates the token — causing 401 on every
+    # subsequent ``claude -p`` spawn. Drop them so the CLI falls back to
+    # the Keychain credentials, which the user manages via ``claude login``.
+    ENV_CLAUDE_BLOCKLIST = (
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+        "CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH",
+        "CLAUDE_CODE_ENTRYPOINT",
+    )
 
     def build_cmd(self, cfg: SpawnConfig) -> list[str]:
         cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", cfg.permission_mode]
@@ -50,7 +64,7 @@ class CCAdapter:
             if k in os.environ:
                 env[k] = os.environ[k]
         for k, v in os.environ.items():
-            if k.startswith(self.ENV_CLAUDE_PREFIX):
+            if k.startswith(self.ENV_CLAUDE_PREFIX) and k not in self.ENV_CLAUDE_BLOCKLIST:
                 env[k] = v
         env.update(cfg.extra_env)
         return env

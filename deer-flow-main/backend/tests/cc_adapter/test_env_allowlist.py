@@ -18,13 +18,17 @@ def _cfg() -> SpawnConfig:
     return SpawnConfig(cwd="/tmp", user_prompt="x")
 
 
-def test_env_allowlist_keeps_PATH_HOME_LANG_LC_ALL_TZ(monkeypatch):
-    """All five basic passthrough vars survive into the subprocess env."""
+def test_env_allowlist_keeps_basic_passthrough(monkeypatch):
+    """Basic passthrough vars survive into the subprocess env. USER/LOGNAME
+    are in the list so macOS Keychain fallback can resolve the login keychain
+    owner when no OAuth token is present in env."""
     monkeypatch.setenv("PATH", "/custom/bin:/usr/bin")
     monkeypatch.setenv("HOME", "/home/tester")
     monkeypatch.setenv("LANG", "en_US.UTF-8")
     monkeypatch.setenv("LC_ALL", "C")
     monkeypatch.setenv("TZ", "UTC")
+    monkeypatch.setenv("USER", "tester")
+    monkeypatch.setenv("LOGNAME", "tester")
 
     env = CCAdapter().build_env(_cfg())
 
@@ -33,18 +37,40 @@ def test_env_allowlist_keeps_PATH_HOME_LANG_LC_ALL_TZ(monkeypatch):
     assert env["LANG"] == "en_US.UTF-8"
     assert env["LC_ALL"] == "C"
     assert env["TZ"] == "UTC"
+    assert env["USER"] == "tester"
+    assert env["LOGNAME"] == "tester"
 
 
-def test_env_allowlist_keeps_CLAUDE_CODE_prefix(monkeypatch):
-    """Anything starting with ``CLAUDE_CODE_`` is passed verbatim — the CLI
-    reads its own OAuth token / debug flags from this namespace."""
-    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-123")
+def test_env_allowlist_keeps_non_host_managed_CLAUDE_CODE_vars(monkeypatch):
+    """``CLAUDE_CODE_*`` vars that are NOT host-managed OAuth state pass
+    through — e.g. debug flags."""
     monkeypatch.setenv("CLAUDE_CODE_DEBUG", "1")
 
     env = CCAdapter().build_env(_cfg())
 
-    assert env.get("CLAUDE_CODE_OAUTH_TOKEN") == "tok-123"
     assert env.get("CLAUDE_CODE_DEBUG") == "1"
+
+
+def test_env_blocklist_drops_host_managed_OAuth_vars(monkeypatch):
+    """Host-managed OAuth state (set by claude-desktop / Claude Code when
+    they spawn child processes) MUST be dropped: those tokens are scoped to
+    the host session and rotate, so a backend started inside a host process
+    would otherwise cache a token at startup that goes stale and 401s on
+    every subsequent ``claude -p`` spawn. Dropping these forces the CLI to
+    fall back to Keychain credentials (``claude login``), which are stable."""
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-stale")
+    monkeypatch.setenv("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST", "1")
+    monkeypatch.setenv("CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH", "1")
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "claude-desktop")
+
+    env = CCAdapter().build_env(_cfg())
+
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
+    assert "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST" not in env
+    assert "CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH" not in env
+    assert "CLAUDE_CODE_ENTRYPOINT" not in env
+    # And the token value must not surface via some other key.
+    assert "tok-stale" not in env.values()
 
 
 def test_env_blocklist_drops_AWS_GCP_TOKEN_KEY_DATABASE_URL(monkeypatch):
