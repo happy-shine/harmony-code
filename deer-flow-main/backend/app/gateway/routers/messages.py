@@ -181,6 +181,113 @@ def list_threads(user_id: str = Depends(current_user_id)) -> dict:
     return {"threads": out}
 
 
+@router.get("/threads/{tid}/history")
+def get_thread_history(
+    tid: str,
+    user_id: str = Depends(current_user_id),
+) -> dict:
+    """Return the thread's past turns so the UI can rehydrate on reload.
+
+    Reads CC's own session jsonl (one line per event), filters out
+    bookkeeping frames (queue-operation / attachment / last-prompt),
+    and normalizes each surviving ``user``/``assistant`` row into a
+    shape the frontend reducer already consumes.
+
+    We deliberately do NOT return adapter/system/result frames — those
+    are per-spawn and would pollute the transcript with stale "system
+    init" banners and cost footers from previous turns. Only the pure
+    conversation turns make it through.
+    """
+    import json
+    from pathlib import Path
+
+    row = _store().get(tid)
+    # Mirror the ownership check used everywhere else: unknown-or-not-yours
+    # collapses to a single 404.
+    if row is None or row.user_id != user_id:
+        raise HTTPException(404, "thread_not_found")
+
+    if row.session_id is None:
+        # Thread was created but never sent a message — no history.
+        return {"messages": []}
+
+    # Claude Code stores session jsonl under
+    # ``~/.claude/projects/<cwd-slug>/<session_id>.jsonl``, where
+    # ``<cwd-slug>`` is the absolute cwd with every "/", ".", and "_"
+    # replaced by "-". For example,
+    # ``/Users/shine/.harmony-code/data/threads/t_abc/user-data/workspace``
+    # maps to
+    # ``-Users-shine--harmony-code-data-threads-t-abc-user-data-workspace``
+    # (note the doubled dashes where dots and underscores were).
+    import re as _re
+
+    home = Path.home()
+    cwd_slug = _re.sub(r"[._/]", "-", row.cwd)
+    jsonl_path = home / ".claude" / "projects" / cwd_slug / f"{row.session_id}.jsonl"
+    if not jsonl_path.exists():
+        # Session id is known but CC hasn't written the file yet (or it was
+        # pruned). Fall back to empty rather than 500 so the UI stays usable.
+        return {"messages": []}
+
+    messages: list[dict] = []
+    with jsonl_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                evt = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            t = evt.get("type")
+            if t not in ("user", "assistant"):
+                # Skip queue-operation / attachment / last-prompt / etc.
+                continue
+            msg = evt.get("message")
+            if not isinstance(msg, dict):
+                continue
+            if t == "user":
+                content = msg.get("content")
+                if isinstance(content, str):
+                    # Plain user prompt. Emit as a synthetic user bubble.
+                    messages.append(
+                        {
+                            "kind": "user_turn",
+                            "id": evt.get("uuid") or f"u-{len(messages)}",
+                            "text": content,
+                        }
+                    )
+                elif isinstance(content, list):
+                    # tool_result batch — forward as-is so the reducer's
+                    # backfill logic attaches them to the right tool_use.
+                    messages.append(
+                        {
+                            "kind": "event",
+                            "event": {
+                                "type": "user",
+                                "message": {"content": content},
+                                "parent_tool_use_id": evt.get("parent_tool_use_id"),
+                            },
+                        }
+                    )
+            elif t == "assistant":
+                # Forward the whole assistant message verbatim. The client-side
+                # reducer's ``handleAssistant`` merges on ``message.id`` so
+                # multiple partials of the same reply (rare in history, common
+                # during live streaming) still coalesce.
+                messages.append(
+                    {
+                        "kind": "event",
+                        "event": {
+                            "type": "assistant",
+                            "message": msg,
+                            "parent_tool_use_id": evt.get("parent_tool_use_id"),
+                        },
+                    }
+                )
+    return {"messages": messages}
+
+
 @router.delete("/threads/{tid}")
 async def delete_thread(tid: str, user_id: str = Depends(current_user_id)) -> dict:
     """Delete a thread row.

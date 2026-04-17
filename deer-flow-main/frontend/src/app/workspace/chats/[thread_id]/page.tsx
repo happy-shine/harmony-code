@@ -15,6 +15,7 @@ import {
 import { FileBrowser } from "@/components/workspace/file-browser";
 import type { UIMessage, UIBlock } from "@/core/messages/cc-reducer";
 import { useThreadStream } from "@/core/threads/cc-hooks";
+import { fetchHarmonyHistory } from "@/core/threads/harmony-threads";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,6 +64,20 @@ export default function CCChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
 
+  // Keep the state in sync with the URL when the user clicks a
+  // different thread in the sidebar. Next's client-side router navigates
+  // within the same dynamic route without remounting this component, so
+  // our initial ``useState`` only runs once — without this effect the
+  // first-mounted thread id stays pinned and every subsequent click
+  // renders a stale transcript.
+  useEffect(() => {
+    const fromPath = isNew ? null : threadIdFromPath;
+    if (fromPath !== threadId) {
+      setThreadId(fromPath);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadIdFromPath, isNew]);
+
   // Hook uses the current threadId. When threadId is null (new thread) we
   // pass an empty string; the hook's `send` won't be called until threadId
   // is set (see pendingMessage pattern below).
@@ -86,6 +101,37 @@ export default function CCChatPage() {
       void qc.invalidateQueries({ queryKey: ["harmony-threads"] });
     }
   }, [stream.status, qc]);
+
+  // Rehydrate the transcript when the user lands on an existing thread
+  // (e.g. clicks a sidebar row, or reloads the page mid-conversation).
+  // Skipped for ``new`` threads — there's nothing stored yet — and
+  // skipped re-runs once the thread id stabilizes, so sending a message
+  // doesn't trigger a refetch that would wipe the live SSE-rendered
+  // transcript we just built up.
+  const hydratedThreadRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!threadId || isNew) return;
+    // StrictMode invokes effects twice in dev: first effect sets the
+    // ref, cleanup fires, then the effect re-runs seeing the ref already
+    // set and skipping. A naive ``let cancelled = false; cleanup →
+    // cancelled = true`` guard would then cancel the first (only) fetch.
+    // Guard on ref identity at dispatch time instead — if the ref
+    // still matches when the fetch resolves, the user is still on this
+    // thread and the hydrate is still wanted.
+    if (hydratedThreadRef.current === threadId) return;
+    hydratedThreadRef.current = threadId;
+    void (async () => {
+      try {
+        const entries = await fetchHarmonyHistory(threadId);
+        if (hydratedThreadRef.current !== threadId) return;
+        stream.hydrateFromHistory(entries);
+      } catch {
+        // 404 (unknown/not-yours) or network error — leave transcript
+        // empty, the user can still send a message.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId, isNew]);
 
   // --- New-thread creation ------------------------------------------------
   const createThread = useCallback(async (): Promise<string> => {

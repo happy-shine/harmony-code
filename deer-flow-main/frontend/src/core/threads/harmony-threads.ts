@@ -32,6 +32,38 @@ export interface HarmonyThread {
   has_session: boolean;
 }
 
+/** One entry in the thread history payload. ``user_turn`` maps to the
+ *  reducer's ``add_user_message`` action; ``event`` feeds the normal
+ *  ``ingest`` pipeline that assistant frames from live SSE also use. */
+export type HarmonyHistoryEntry =
+  | { kind: "user_turn"; id: string; text: string }
+  | { kind: "event"; event: { type: string; [key: string]: unknown } };
+
+export async function fetchHarmonyHistory(
+  threadId: string,
+): Promise<HarmonyHistoryEntry[]> {
+  const r = await fetch(`/api/threads/${threadId}/history`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!r.ok) {
+    // 404 = unknown-or-not-yours; the page simply renders an empty
+    // transcript in that case, so we surface a typed error for callers
+    // that want to distinguish rather than throwing opaquely.
+    let detail = `${r.status}`;
+    try {
+      const j = (await r.json()) as { detail?: string };
+      if (j.detail) detail = j.detail;
+    } catch {
+      // fall through
+    }
+    throw new Error(detail);
+  }
+  const j = (await r.json()) as { messages: HarmonyHistoryEntry[] };
+  return j.messages ?? [];
+}
+
 interface HarmonyThreadList {
   threads: HarmonyThread[];
 }

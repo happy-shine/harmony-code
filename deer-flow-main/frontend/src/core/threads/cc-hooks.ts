@@ -77,9 +77,34 @@ export function useThreadStream(threadId: string) {
     abortRef.current = null;
   }, []);
 
+  const hydrateFromHistory = useCallback(
+    (
+      entries: Array<
+        | { kind: "user_turn"; id: string; text: string }
+        | { kind: "event"; event: { type: string; [key: string]: unknown } }
+      >,
+    ) => {
+      // Reset current state first so reopening a thread doesn't concat
+      // the previous session's transcript onto whatever we just loaded.
+      dispatch({ type: "reset" });
+      for (const entry of entries) {
+        if (entry.kind === "user_turn") {
+          dispatch({
+            type: "add_user_message",
+            id: entry.id,
+            text: entry.text,
+          } as Action);
+        } else {
+          dispatch({ type: "ingest", event: entry.event } as Action);
+        }
+      }
+    },
+    [],
+  );
+
   const reset = useCallback(() => {
     dispatch({ type: "reset" });
   }, []);
 
-  return { ...state, status, error, send, cancel, reset };
+  return { ...state, status, error, send, cancel, reset, hydrateFromHistory };
 }
