@@ -19,6 +19,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
+import {
+  handleUnauthorized,
+  UnauthorizedError,
+} from "@/core/api/unauthorized";
+
 export interface HarmonySkill {
   id: string;
   user_id: string | null;
@@ -36,6 +41,7 @@ export async function uploadSkillZip(file: File): Promise<HarmonySkill> {
     credentials: "include",
     body: form,
   });
+  if (handleUnauthorized(r)) throw new UnauthorizedError();
   if (!r.ok) {
     let detail = `${r.status}`;
     try {
@@ -59,6 +65,7 @@ export async function gitInstallSkill(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(name ? { url, name } : { url }),
   });
+  if (handleUnauthorized(r)) throw new UnauthorizedError();
   if (!r.ok) {
     let detail = `${r.status}`;
     try {
@@ -77,6 +84,7 @@ export async function deleteHarmonySkill(id: string): Promise<void> {
     method: "DELETE",
     credentials: "include",
   });
+  if (handleUnauthorized(r)) throw new UnauthorizedError();
   if (!r.ok) {
     let detail = `${r.status}`;
     try {
@@ -91,6 +99,7 @@ export async function deleteHarmonySkill(id: string): Promise<void> {
 
 export async function fetchHarmonySkills(): Promise<HarmonySkill[]> {
   const r = await fetch("/api/skills", { method: "GET", credentials: "include", cache: "no-store" });
+  if (handleUnauthorized(r)) throw new UnauthorizedError();
   if (!r.ok) throw new Error(`list skills failed: ${r.status}`);
   return (await r.json()) as HarmonySkill[];
 }
@@ -105,6 +114,7 @@ export async function patchHarmonySkill(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
+  if (handleUnauthorized(r)) throw new UnauthorizedError();
   if (!r.ok) {
     let detail = `${r.status}`;
     try {

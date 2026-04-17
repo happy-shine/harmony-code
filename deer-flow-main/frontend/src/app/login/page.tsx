@@ -16,13 +16,14 @@
  * strict auth lands.
  */
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { getBackendBaseURL } from "@/core/config";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +45,14 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      router.push("/workspace/chats/new");
+      // Return to wherever the 401 interceptor bounced us from. We only
+      // honor same-origin relative paths to avoid becoming an open-redirect.
+      const rawNext = searchParams.get("next");
+      const next =
+        rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//")
+          ? rawNext
+          : "/workspace/chats/new";
+      router.push(next);
     } catch (err) {
       setError((err as Error).message || "Network error");
       setLoading(false);

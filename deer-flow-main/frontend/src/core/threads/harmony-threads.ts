@@ -25,6 +25,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
+import {
+  handleUnauthorized,
+  UnauthorizedError,
+} from "@/core/api/unauthorized";
+
 export interface HarmonyThread {
   id: string;
   title: string | null;
@@ -47,6 +52,7 @@ export async function fetchHarmonyHistory(
     credentials: "include",
     cache: "no-store",
   });
+  if (handleUnauthorized(r)) throw new UnauthorizedError();
   if (!r.ok) {
     // 404 = unknown-or-not-yours; the page simply renders an empty
     // transcript in that case, so we surface a typed error for callers
@@ -74,6 +80,7 @@ export async function fetchHarmonyThreads(): Promise<HarmonyThread[]> {
     credentials: "include",
     cache: "no-store",
   });
+  if (handleUnauthorized(r)) throw new UnauthorizedError();
   if (!r.ok) throw new Error(`list threads failed: ${r.status}`);
   const j = (await r.json()) as HarmonyThreadList;
   return j.threads ?? [];
@@ -84,6 +91,7 @@ export async function deleteHarmonyThread(id: string): Promise<void> {
     method: "DELETE",
     credentials: "include",
   });
+  if (handleUnauthorized(r)) throw new UnauthorizedError();
   if (!r.ok) {
     // 409 = thread_busy (stream in flight); 404 = not-yours-or-unknown.
     let detail = `${r.status}`;

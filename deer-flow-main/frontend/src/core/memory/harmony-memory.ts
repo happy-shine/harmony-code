@@ -23,6 +23,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
+import {
+  handleUnauthorized,
+  UnauthorizedError,
+} from "@/core/api/unauthorized";
+
 export interface MemoryFact {
   id: string;
   content: string;
@@ -51,6 +56,7 @@ export interface MemoryFactPatchInput {
 }
 
 async function throwDetail(r: Response): Promise<never> {
+  if (handleUnauthorized(r)) throw new UnauthorizedError();
   let detail = `${r.status}`;
   try {
     const j = (await r.json()) as { detail?: string };

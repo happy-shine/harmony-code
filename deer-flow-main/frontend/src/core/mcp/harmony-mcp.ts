@@ -18,6 +18,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
+import {
+  handleUnauthorized,
+  UnauthorizedError,
+} from "@/core/api/unauthorized";
+
 export interface HarmonyMCPServer {
   id: string;
   user_id: string | null;
@@ -51,6 +56,7 @@ export async function createMCPServer(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  if (handleUnauthorized(r)) throw new UnauthorizedError();
   if (!r.ok) {
     let detail = `${r.status}`;
     try {
@@ -69,6 +75,7 @@ export async function deleteMCPServer(id: string): Promise<void> {
     method: "DELETE",
     credentials: "include",
   });
+  if (handleUnauthorized(r)) throw new UnauthorizedError();
   if (!r.ok) {
     let detail = `${r.status}`;
     try {
@@ -83,6 +90,7 @@ export async function deleteMCPServer(id: string): Promise<void> {
 
 export async function fetchMCPServers(): Promise<HarmonyMCPServer[]> {
   const r = await fetch("/api/mcp", { method: "GET", credentials: "include", cache: "no-store" });
+  if (handleUnauthorized(r)) throw new UnauthorizedError();
   if (!r.ok) throw new Error(`list mcp failed: ${r.status}`);
   return (await r.json()) as HarmonyMCPServer[];
 }

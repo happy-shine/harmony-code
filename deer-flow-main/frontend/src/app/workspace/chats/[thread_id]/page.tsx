@@ -13,6 +13,10 @@ import {
   ResultFooter,
 } from "@/components/workspace/cc-blocks";
 import { FileBrowser } from "@/components/workspace/file-browser";
+import {
+  handleUnauthorized,
+  UnauthorizedError,
+} from "@/core/api/unauthorized";
 import type { UIMessage, UIBlock } from "@/core/messages/cc-reducer";
 import { useThreadStream } from "@/core/threads/cc-hooks";
 import { fetchHarmonyHistory } from "@/core/threads/harmony-threads";
@@ -63,6 +67,57 @@ export default function CCChatPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
+
+  // Files panel width. Persisted in localStorage so the user's preference
+  // survives reloads; clamped against the window inside the drag handler
+  // so a previously-saved value that no longer fits (e.g. after a window
+  // resize) doesn't leave the chat column unreachable.
+  const [filesPanelWidth, setFilesPanelWidth] = useState<number>(520);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem("harmony.filesPanelWidth");
+    if (saved != null) {
+      const n = Number.parseInt(saved, 10);
+      if (Number.isFinite(n) && n > 0) setFilesPanelWidth(n);
+    }
+  }, []);
+  const startFilesResize = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = filesPanelWidth;
+    const MIN = 280;
+    // Leave ~360px for the chat column regardless of screen size.
+    const maxFor = (w: number) => Math.max(MIN, w - 360);
+    function onMove(ev: PointerEvent) {
+      const dx = startX - ev.clientX;
+      const next = Math.min(
+        maxFor(window.innerWidth),
+        Math.max(MIN, startW + dx),
+      );
+      setFilesPanelWidth(next);
+    }
+    function onUp() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      // Save at end of drag so we don't thrash localStorage at 60 Hz.
+      try {
+        window.localStorage.setItem(
+          "harmony.filesPanelWidth",
+          String(Math.round(filesPanelWidthRef.current)),
+        );
+      } catch {
+        // private browsing / quota — non-fatal
+      }
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [filesPanelWidth]);
+  // Ref so the pointerup handler reads the latest value without
+  // re-registering the listeners every render.
+  const filesPanelWidthRef = useRef(filesPanelWidth);
+  useEffect(() => {
+    filesPanelWidthRef.current = filesPanelWidth;
+  }, [filesPanelWidth]);
 
   // Keep the state in sync with the URL when the user clicks a
   // different thread in the sidebar. Next's client-side router navigates
@@ -139,6 +194,7 @@ export default function CCChatPage() {
       method: "POST",
       credentials: "include",
     });
+    if (handleUnauthorized(r)) throw new UnauthorizedError();
     if (!r.ok) throw new Error(`Create thread failed: ${r.status}`);
     const data = (await r.json()) as { id: string };
     setThreadId(data.id);
@@ -189,12 +245,27 @@ export default function CCChatPage() {
     inputRef.current?.focus();
   }, [input, threadId, createThread, stream]);
 
+  // Track IME composition so Enter during candidate selection doesn't
+  // submit. On macOS + Chinese / Japanese / Korean input methods the
+  // first Enter confirms the highlighted candidate — firing our "send"
+  // handler on it surprises the user with an unintended message. The
+  // native ``isComposing`` / ``keyCode === 229`` signals cover every
+  // browser+IME combo we care about; we still track our own flag as a
+  // belt-and-suspenders since ``keyCode`` is non-standard and some
+  // Chromium IMEs report ``isComposing=false`` on the Enter itself.
+  const composingRef = useRef(false);
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        void handleSend();
+      if (e.key !== "Enter" || e.shiftKey) return;
+      if (
+        composingRef.current ||
+        e.nativeEvent.isComposing ||
+        e.keyCode === 229
+      ) {
+        return;
       }
+      e.preventDefault();
+      void handleSend();
     },
     [handleSend],
   );
@@ -314,6 +385,12 @@ export default function CCChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false;
+            }}
             placeholder="Type a message..."
             disabled={stream.status === "running"}
             className="flex-1 rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 dark:border-neutral-700"
@@ -340,9 +417,25 @@ export default function CCChatPage() {
       </div>
 
       {showFiles && threadId && (
-        <aside className="hidden h-full w-[520px] shrink-0 md:flex">
-          <FileBrowser threadId={threadId} className="h-full w-full" />
-        </aside>
+        <>
+          {/* Drag handle — vertical strip along the left edge of the
+              files panel. pointer events trigger startFilesResize, which
+              listens on window for move/up so the drag doesn't break when
+              the cursor leaves the handle at speed. */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize files panel"
+            onPointerDown={startFilesResize}
+            className="hidden w-1 shrink-0 cursor-col-resize bg-neutral-200 transition-colors hover:bg-blue-400 md:block dark:bg-neutral-800 dark:hover:bg-blue-500"
+          />
+          <aside
+            className="hidden h-full shrink-0 md:flex"
+            style={{ width: filesPanelWidth }}
+          >
+            <FileBrowser threadId={threadId} className="h-full w-full" />
+          </aside>
+        </>
       )}
     </div>
   );
