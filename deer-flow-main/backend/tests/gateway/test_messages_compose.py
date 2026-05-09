@@ -157,11 +157,9 @@ def test_send_message_composes_mcp_and_skills(migrated_data_dir, monkeypatch):
 
 
 def test_inflight_released_when_compose_fails(migrated_data_dir, monkeypatch):
-    """If compose raises before ``event_gen`` starts, ``_inflight`` must not leak.
-
-    ``event_gen``'s ``finally`` only runs once the async generator is iterated,
-    so a failure between the inflight-add and the ``EventSourceResponse`` return
-    would otherwise wedge the thread at 409 until server restart.
+    """If compose raises before the runner is started, no admission slot
+    or registry entry must leak — otherwise the thread would wedge at
+    409 ``thread_busy`` until server restart.
     """
     # Seed a malformed stdio MCP row (no command) so compose_mcp_config raises ValueError.
     db = Db(get_engine(migrated_data_dir))
@@ -179,8 +177,10 @@ def test_inflight_released_when_compose_fails(migrated_data_dir, monkeypatch):
     r1 = client.post(f"/api/threads/{tid}/messages", json={"content": "hi"})
     assert r1.status_code == 500  # FastAPI default when handler raises non-HTTPException
 
-    # _inflight should be empty — second attempt must NOT 409 with 'thread_busy'
-    assert tid not in messages._inflight, "inflight leaked after compose failure"
+    # No runner should be registered for this thread after the compose failure.
+    assert messages._runner_registry.get(tid) is None, "runner leaked after compose failure"
+    # Per-user counter must also be back to 0 — otherwise the next request 429s.
+    assert messages._user_inflight == {}, "user_inflight leaked after compose failure"
 
 
 def test_send_message_passes_user_default_model_to_spawn(migrated_data_dir, monkeypatch):

@@ -23,6 +23,7 @@ from app.audit import emit as audit_emit
 from app.audit_events import result_event, spawn_event
 from app.cc_adapter.adapter import CCAdapter
 from app.cc_adapter.compose import compose_mcp_config, compose_skills_dir
+from app.cc_adapter.runner import RunnerOutcome, RunnerRegistry
 from app.cc_adapter.types import SpawnConfig
 from app.gateway.deps import (
     current_user_id,
@@ -58,13 +59,27 @@ class SendMessageBody(BaseModel):
 _MAX_PER_USER = int(os.environ.get("HARMONY_MAX_PER_USER", "3"))
 _MAX_SERVER = int(os.environ.get("HARMONY_MAX_SERVER", "20"))
 
-# Counters are guarded by ``_inflight_lock``. The server total is wrapped
-# in a one-element list to avoid ``global`` + reassignment ceremony at
-# every mutation site.
-_inflight: set[str] = set()
+# Per-user / server-wide counters guarded by ``_inflight_lock``. The
+# server total is wrapped in a one-element list to avoid ``global`` +
+# reassignment ceremony at every mutation site. Per-thread admission is
+# delegated to ``_runner_registry`` — there is at most one ThreadRunner
+# per thread_id, and ``registry.active(tid)`` is the source of truth.
 _user_inflight: dict[str, int] = {}
 _server_inflight: list[int] = [0]
 _inflight_lock = asyncio.Lock()
+
+# Registry of in-flight (and recently-finished) ThreadRunners. Module
+# scope so it persists for the lifetime of the gateway process. The bus
+# replay buffer inside each runner gives reconnecting clients up to
+# ``RunnerRegistry.DEFAULT_IDLE_RETENTION_SECONDS`` to catch up on a run
+# whose SSE link dropped.
+_runner_registry: RunnerRegistry = RunnerRegistry()
+
+
+def runner_registry() -> RunnerRegistry:
+    """Test-friendly accessor — tests can monkeypatch this to swap in a
+    fresh registry per test, avoiding cross-test runner leakage."""
+    return _runner_registry
 
 
 def _build_memory_system_prompt(db, user_id: str) -> str | None:
@@ -116,14 +131,14 @@ def _derive_title(prompt: str, *, max_chars: int = 80) -> str:
     return f"{cut}…"
 
 
-async def _release_admission(tid: str, user_id: str) -> None:
-    """Release per-thread + per-user + server-wide slots.
+async def _release_admission(user_id: str) -> None:
+    """Release per-user + server-wide slots.
 
-    Idempotent — safe to call twice (e.g. once in ``event_gen.finally``
-    and again in a defensive outer except). All counters clamp at 0.
+    Idempotent — safe to call multiple times. All counters clamp at 0.
+    Per-thread "is something running" lives on the runner registry, so
+    there is no per-thread counter to release here.
     """
     async with _inflight_lock:
-        _inflight.discard(tid)
         if user_id in _user_inflight:
             _user_inflight[user_id] -= 1
             if _user_inflight[user_id] <= 0:
@@ -306,9 +321,8 @@ async def delete_thread(tid: str, user_id: str = Depends(current_user_id)) -> di
     row = store.get(tid)
     if row is None or row.user_id != user_id:
         raise HTTPException(404, "thread_not_found")
-    async with _inflight_lock:
-        if tid in _inflight:
-            raise HTTPException(409, "thread_busy")
+    if runner_registry().active(tid):
+        raise HTTPException(409, "thread_busy")
     store.delete(tid)
     return {"deleted": True, "id": tid}
 
@@ -332,15 +346,16 @@ async def send_message(
     # Admission control per design Section 2 concurrency table:
     # server capacity (503) > per-user concurrency (429) > per-thread
     # serialize (409). Evaluated in that order under the lock so we
-    # never admit past a higher-scope limit.
+    # never admit past a higher-scope limit. Per-thread "busy" means
+    # the runner registry has a still-running ThreadRunner for this tid.
+    registry = runner_registry()
     async with _inflight_lock:
         if _server_inflight[0] >= _MAX_SERVER:
             raise HTTPException(503, "server_busy")
         if _user_inflight.get(user_id, 0) >= _MAX_PER_USER:
             raise HTTPException(429, "user_concurrency_limit")
-        if tid in _inflight:
+        if registry.active(tid):
             raise HTTPException(409, "thread_busy")
-        _inflight.add(tid)
         _user_inflight[user_id] = _user_inflight.get(user_id, 0) + 1
         _server_inflight[0] += 1
 
@@ -423,99 +438,153 @@ async def send_message(
             )
         )
     except BaseException:
-        await _release_admission(tid, user_id)
+        await _release_admission(user_id)
         raise
 
-    async def event_gen() -> AsyncIterator[dict]:
-        gen = adapter.run(cfg)
-        start = time.monotonic()
-        disposition: str = "error"  # default until proven otherwise
-        exit_code = 0
-        cost_usd: float | None = None
-        observed_session_id: str | None = row.session_id
-        try:
-            async for ev in gen:
-                if await request.is_disconnected():
-                    disposition = "disconnected"
-                    exit_code = -1
-                    await gen.aclose()
-                    break
-                # capture session_id on first init
-                if ev.get("type") == "system" and ev.get("subtype") == "init":
-                    sid = ev.get("session_id")
-                    if sid:
-                        observed_session_id = sid
-                        if row.session_id is None:
-                            store.set_session_id(tid, sid)
-                # capture terminal cost info
-                if ev.get("type") == "result":
-                    cost = ev.get("total_cost_usd")
-                    if cost is None:
-                        cost = ev.get("cost_usd")
-                    if cost is not None:
-                        cost_usd = cost
-                # capture nonzero-exit diagnostic
-                if ev.get("type") == "_adapter" and ev.get("subtype") == "error" and ev.get("code") == "cc_nonzero_exit":
-                    ec = ev.get("exit_code")
-                    if isinstance(ec, int):
-                        exit_code = ec
-                yield {"data": json.dumps(ev, separators=(",", ":"))}
-            else:
-                # natural EOF: emit done. (Skipped on break.)
-                disposition = "natural"
-                yield {"event": "done", "data": "{}"}
-        finally:
-            # Belt-and-suspenders: if we exit via exception or cancellation,
-            # aclose the adapter generator to drive its GeneratorExit cleanup.
-            try:
-                await gen.aclose()
-            except Exception as e:  # pragma: no cover
-                logger.debug("adapter aclose swallowed on cleanup: %r", e)
-            # On the error path (any exception before the for/else fired
-            # AND no disconnect was observed), exit_code stays 0 unless an
-            # adapter.error frame was seen — normalize it to -1 since the
-            # run did not finish cleanly.
-            if disposition == "error":
-                exit_code = -1
-            duration_ms = int((time.monotonic() - start) * 1000)
-            try:
-                audit_emit(
-                    result_event(
-                        user_id=user_id,
-                        thread_id=tid,
-                        session_id=observed_session_id,
-                        duration_ms=duration_ms,
-                        exit_code=exit_code,
-                        cost_usd=cost_usd,
-                        disposition=disposition,  # type: ignore[arg-type]
-                    )
-                )
-            except Exception as e:  # pragma: no cover
-                logger.debug("audit result emit swallowed: %r", e)
-            await _release_admission(tid, user_id)
+    # Spin up a ThreadRunner and start the CC subprocess inside its own
+    # background task. The on_terminate hook fires when the run finishes
+    # (naturally / cancelled / errored) — that's where we emit cc.result
+    # and free this user's admission slot. Critically, the runner is
+    # NOT bound to this HTTP request: if the SSE client disconnects, the
+    # runner keeps going and the next reconnect (POST returning 409 +
+    # GET /stream subscribing to the bus) drains the buffered events.
+    start_ts = time.monotonic()
 
-    return EventSourceResponse(event_gen())
+    async def _on_terminate(outcome: RunnerOutcome) -> None:
+        # Persist the session_id captured from the first ``init`` frame
+        # so subsequent turns on this thread can ``--resume <sid>``.
+        if outcome.session_id and row.session_id is None:
+            try:
+                store.set_session_id(tid, outcome.session_id)
+            except Exception as e:  # pragma: no cover - persistence is best-effort
+                logger.debug("set_session_id failed: %r", e)
+        duration_ms = outcome.duration_ms or int((time.monotonic() - start_ts) * 1000)
+        try:
+            audit_emit(
+                result_event(
+                    user_id=user_id,
+                    thread_id=tid,
+                    session_id=outcome.session_id,
+                    duration_ms=duration_ms,
+                    exit_code=outcome.exit_code,
+                    cost_usd=outcome.cost_usd,
+                    disposition=outcome.disposition,
+                )
+            )
+        except Exception as e:  # pragma: no cover
+            logger.debug("audit result emit swallowed: %r", e)
+        await _release_admission(user_id)
+
+    try:
+        runner = await registry.start(
+            thread_id=tid,
+            cfg=cfg,
+            adapter=adapter,
+            on_terminate=_on_terminate,
+        )
+    except BaseException:
+        await _release_admission(user_id)
+        raise
+
+    return EventSourceResponse(_subscribe_sse(runner, after_event_id=0))
+
+
+def _parse_last_event_id(header_value: str | None, expected_run_id: str) -> int:
+    """Parse an SSE ``Last-Event-ID`` header into a cursor for resume.
+
+    The id format we emit is ``<run_id>:<event_id>``. On reconnect the
+    client echoes that back, and we resume from ``event_id`` *only* if
+    the run_id matches the current runner — a stale id from a previous
+    run resets to 0 (the new run starts fresh from event 1).
+    """
+    if not header_value:
+        return 0
+    if ":" not in header_value:
+        return 0
+    rid, _, eid = header_value.partition(":")
+    if rid != expected_run_id:
+        return 0
+    try:
+        return max(0, int(eid))
+    except ValueError:
+        return 0
+
+
+async def _subscribe_sse(runner, after_event_id: int) -> AsyncIterator[dict]:
+    """Drain ``runner.bus`` and yield SSE-shaped frames.
+
+    Each yielded dict carries an ``id`` field of the form
+    ``<run_id>:<event_id>`` so reconnecting clients can resume via
+    the standard ``Last-Event-ID`` header. Exits when the bus closes
+    (the runner finished — naturally, cancelled, or errored) by emitting
+    a terminal ``done`` SSE event.
+
+    Disconnects are handled by the underlying ``EventSourceResponse`` /
+    ``async for`` machinery: when the client goes away, this generator
+    is acloseed, which drops the bus subscription. The runner keeps
+    running. That is the entire point.
+    """
+    async for eid, ev in runner.bus.subscribe(after_event_id=after_event_id):
+        # Skip the synthetic ``lost_events`` marker's id (it's id=0).
+        # We still emit it as data so the client can act on it.
+        sse_id = f"{runner.run_id}:{eid}" if eid > 0 else None
+        frame = {"data": json.dumps(ev, separators=(",", ":"))}
+        if sse_id is not None:
+            frame["id"] = sse_id
+        yield frame
+    # Bus closed → run is over. Emit the terminal SSE ``done`` event so
+    # clients can stop listening cleanly.
+    yield {"event": "done", "data": "{}"}
 
 
 @router.post("/threads/{tid}/cancel")
 async def cancel_thread(tid: str, user_id: str = Depends(current_user_id)):
-    """Explicit cancel. Ownership-aware stub.
+    """Cancel the thread's in-flight CC run, if any.
 
-    CC actually dies via the client-disconnect path (SSE stream abort →
-    sse-starlette closes event_gen → adapter's GeneratorExit handler
-    terminates the subprocess). This endpoint still validates ownership
-    so cross-user callers can't use it to probe which thread ids exist or
-    leak the current inflight set. Task 5.3.
+    With the runner registry decoupling SSE from CC lifecycle, the
+    client-disconnect path no longer kills the subprocess — this
+    endpoint is the *only* way to actually stop a running agent. Sends
+    SIGTERM (with the adapter's standard 2s grace before SIGKILL) and
+    waits for the runner's terminate hook to finish before returning,
+    so the caller knows the slot is free.
 
-    M-future wires the body to a task registry that can signal an
-    in-flight stream; the 404 gate here stays.
+    Ownership-aware: an unknown-or-not-yours tid collapses to 404 to
+    avoid leaking which thread ids exist across users.
     """
-    # Ownership check before touching _inflight. Same 404-for-both rule
-    # as send_message so this endpoint doesn't reveal thread existence.
     row = _store().get(tid)
     if row is None or row.user_id != user_id:
         raise HTTPException(404, "thread_not_found")
-    async with _inflight_lock:
-        if tid not in _inflight:
-            return {"canceled": False, "reason": "no_inflight"}
-    return {"canceled": True, "note": "disconnect to actually cancel; explicit kill is M5"}
+    canceled = await runner_registry().cancel(tid)
+    if not canceled:
+        return {"canceled": False, "reason": "no_inflight"}
+    return {"canceled": True}
+
+
+@router.get("/threads/{tid}/stream")
+async def stream_thread(
+    tid: str,
+    request: Request,
+    user_id: str = Depends(current_user_id),
+):
+    """Subscribe to a thread's *current* CC run without starting a new one.
+
+    The reconnect path. After ``POST /messages`` returns, every event
+    flows out of the runner's EventBus — if the network drops or the
+    user reloads the page, the run keeps going on the server. This
+    endpoint lets the client hop back onto the bus, optionally with
+    ``Last-Event-ID: <run_id>:<event_id>`` for replay-from-cursor.
+
+    Returns 404 if there is no active or recently-finished runner for
+    this thread (no live run AND nothing in the registry's retention
+    window). When the runner finished naturally a few seconds ago we
+    still serve the buffered tail so a slow-reconnecting client sees
+    the assistant's final output.
+    """
+    row = _store().get(tid)
+    if row is None or row.user_id != user_id:
+        raise HTTPException(404, "thread_not_found")
+    runner = runner_registry().get(tid)
+    if runner is None:
+        raise HTTPException(404, "no_active_run")
+    after = _parse_last_event_id(request.headers.get("last-event-id"), runner.run_id)
+    return EventSourceResponse(_subscribe_sse(runner, after_event_id=after))

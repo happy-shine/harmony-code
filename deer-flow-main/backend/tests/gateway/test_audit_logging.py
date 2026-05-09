@@ -205,54 +205,90 @@ def test_audit_result_captures_exit_code_from_adapter_error(migrated_data_dir, m
     assert result["exit_code"] == 7
 
 
-def test_audit_result_disposition_disconnected(migrated_data_dir, monkeypatch, caplog):
-    """Client disconnects mid-stream: the ``if await request.is_disconnected()``
-    branch fires, ``event_gen`` breaks out of the ``async for`` (so the
-    ``for ... else`` does NOT run) and sets ``disposition = "disconnected"``
-    and ``exit_code = -1``. The result audit line must reflect both."""
-    # Monkeypatch Request.is_disconnected to return True on the second call
-    # (first call runs after the init frame yields; second runs after the
-    # result frame yields and triggers the break). Must be async.
-    from starlette.requests import Request
+@pytest.mark.asyncio
+async def test_audit_result_disposition_cancelled(migrated_data_dir, monkeypatch, caplog):
+    """``POST /cancel`` while a runner is active → audit ``cc.result`` with
+    ``disposition="cancelled"`` and ``exit_code=-1``. Replaces the old
+    "disconnected" path: SSE disconnects no longer terminate the runner,
+    so an explicit cancel is now the only way to stop a run early.
 
-    call_count = {"n": 0}
+    The test drives the runner directly (no httpx round-trip) so the
+    fake adapter's hang-until-cancel reads cleanly under the same
+    pytest-asyncio event loop the registry binds its lock to.
+    """
+    import asyncio
 
-    async def fake_is_disconnected(self):
-        call_count["n"] += 1
-        return call_count["n"] >= 2
+    from app.audit import emit as audit_emit
+    from app.audit_events import result_event, spawn_event
+    from app.cc_adapter.adapter import CCAdapter
 
-    monkeypatch.setattr(Request, "is_disconnected", fake_is_disconnected)
+    # Fresh registry bound to this loop so module-level state from prior
+    # tests can't bleed in.
+    from app.cc_adapter.runner import RunnerOutcome, RunnerRegistry
+    from app.cc_adapter.types import SpawnConfig
+    from app.gateway.routers import messages as messages_mod
 
-    _install_fake_adapter(
-        monkeypatch,
-        events=[
-            {"type": "system", "subtype": "init", "session_id": "s_disc"},
-            {"type": "assistant", "message": {"content": "partial"}},
-            # Never reached — break fires after the second is_disconnected check.
-            {"type": "result", "total_cost_usd": 0.01},
-        ],
-    )
+    messages_mod._runner_registry = RunnerRegistry()
 
+    async def fake_run(self, cfg):  # noqa: ARG001
+        yield {"type": "system", "subtype": "init", "session_id": "s_cancel"}
+        # Hang until task cancel unwinds us. The runner's CancelledError
+        # path will publish the synthetic ``cancelled`` frame and fire
+        # the on_terminate hook with disposition="cancelled".
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr("app.cc_adapter.adapter.CCAdapter.run", fake_run)
     caplog.set_level(logging.INFO, logger="harmony.audit")
 
-    from app.gateway.harmony_app import app
+    cfg = SpawnConfig(cwd=str(migrated_data_dir), user_prompt="x")
 
-    client = TestClient(app)
-    tid = client.post("/api/threads", json={}).json()["id"]
+    # Mirror what the router does: emit cc.spawn before start, then
+    # register an on_terminate hook that emits cc.result.
+    audit_emit(
+        spawn_event(
+            user_id="u_default",
+            thread_id="t_cancel",
+            session_id=None,
+            model=None,
+            argv_without_prompt=[],
+            prompt_len=1,
+            mcp_servers_enabled=[],
+            skills_enabled=[],
+        )
+    )
 
-    with client.stream("POST", f"/api/threads/{tid}/messages", json={"content": "x"}) as resp:
-        assert resp.status_code == 200
-        for _ in resp.iter_text():
-            pass
+    async def _on_terminate(outcome: RunnerOutcome) -> None:
+        audit_emit(
+            result_event(
+                user_id="u_default",
+                thread_id="t_cancel",
+                session_id=outcome.session_id,
+                duration_ms=outcome.duration_ms,
+                exit_code=outcome.exit_code,
+                cost_usd=outcome.cost_usd,
+                disposition=outcome.disposition,
+            )
+        )
+
+    runner = await messages_mod._runner_registry.start(
+        thread_id="t_cancel",
+        cfg=cfg,
+        adapter=CCAdapter(),
+        on_terminate=_on_terminate,
+    )
+    # Give the fake adapter time to yield the init frame and reach the sleep.
+    await asyncio.sleep(0.05)
+    canceled = await messages_mod._runner_registry.cancel("t_cancel")
+    assert canceled is True
+    assert runner.disposition == "cancelled"
 
     lines = _parse_audit_lines(caplog)
     assert len(lines) == 2, f"expected exactly 2 audit lines, got {lines!r}"
     _, result = lines
     assert result["event"] == "cc.result"
-    assert result["disposition"] == "disconnected"
+    assert result["disposition"] == "cancelled"
     assert result["exit_code"] == -1
-    # session_id was still captured from the init frame before the break.
-    assert result["session_id"] == "s_disc"
+    assert result["session_id"] == "s_cancel"
 
 
 def test_audit_result_disposition_error(migrated_data_dir, monkeypatch, caplog):

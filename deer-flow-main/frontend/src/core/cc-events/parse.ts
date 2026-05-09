@@ -8,7 +8,7 @@ import type { StreamEvent } from "./types";
 // ---------------------------------------------------------------------------
 
 export type ParsedFrame =
-  | { kind: "data"; event: StreamEvent }
+  | { kind: "data"; event: StreamEvent; id?: string }
   | { kind: "done" }
   | { kind: "error"; payload: Record<string, unknown> }
   | { kind: "invalid"; reason: string };
@@ -24,6 +24,7 @@ export function parseSSEFrame(frame: string): ParsedFrame {
   // Lines may be terminated by "\n" or "\r\n" — strip trailing "\r" per-line.
   const lines = frame.split("\n").map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l));
   let eventName = "";
+  let id: string | undefined;
   const dataLines: string[] = [];
 
   for (const line of lines) {
@@ -31,6 +32,11 @@ export function parseSSEFrame(frame: string): ParsedFrame {
       eventName = line.slice(7).trim();
     } else if (line.startsWith("data: ")) {
       dataLines.push(line.slice(6));
+    } else if (line.startsWith("id: ")) {
+      // Backend emits ``<run_id>:<event_id>``. We pass it through opaque
+      // so callers can echo it as ``Last-Event-ID`` on reconnect — only
+      // the backend interprets the structure.
+      id = line.slice(4).trim();
     }
   }
 
@@ -52,7 +58,7 @@ export function parseSSEFrame(frame: string): ParsedFrame {
   }
 
   try {
-    return { kind: "data", event: JSON.parse(dataStr) as StreamEvent };
+    return { kind: "data", event: JSON.parse(dataStr) as StreamEvent, id };
   } catch {
     return { kind: "invalid", reason: "data not json" };
   }

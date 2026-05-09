@@ -2,6 +2,17 @@
 claude-code-main/
 emergency_plan_swiftgen_v2-main/
 
+# Local runtime / assistant state
+.claude/
+.harmony-data/
+.codex/
+
+# Local archives and exports
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+
 # Python
 __pycache__/
 *.py[cod]

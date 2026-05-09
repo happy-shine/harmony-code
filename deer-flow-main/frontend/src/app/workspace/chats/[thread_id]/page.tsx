@@ -185,6 +185,12 @@ export default function CCChatPage() {
         const entries = await fetchHarmonyHistory(threadId);
         if (hydratedThreadRef.current !== threadId) return;
         stream.hydrateFromHistory(entries);
+        // After history is loaded, attempt to re-attach to a still-running
+        // agent on this thread. The runner is decoupled from any single
+        // HTTP request, so a previous tab / device / page-load may have
+        // started a long task that's still going on the server. ``resume``
+        // is a no-op if there's nothing to attach to (404 → "no_active_run").
+        void stream.resume();
       } catch {
         // 404 (unknown/not-yours) or network error — leave transcript
         // empty, the user can still send a message.

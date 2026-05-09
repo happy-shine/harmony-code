@@ -66,16 +66,18 @@ def migrated_data_dir(tmp_path, monkeypatch):
 
 @pytest.fixture
 def reset_counters():
-    """Every test runs against a fresh inflight/user/server counter state.
+    """Snap module state clean before AND after each test.
 
-    ``messages`` is a module-level singleton; other tests may have left
-    the counters in a non-zero state if they failed mid-flight. We snap
-    back to zero pre-test AND post-test so we don't corrupt later tests.
+    The registry holds finished runners for an idle-retention window and
+    other tests may have left active or parked runners — replace it
+    wholesale rather than chasing per-key cleanup. The per-user / server
+    counters are simple ints/dicts.
     """
+    from app.cc_adapter.runner import RunnerRegistry
     from app.gateway.routers import messages
 
     def _zero() -> None:
-        messages._inflight.clear()
+        messages._runner_registry = RunnerRegistry()
         messages._user_inflight.clear()
         messages._server_inflight[0] = 0
 
@@ -271,7 +273,7 @@ async def test_limits_released_on_completion(migrated_data_dir, monkeypatch, res
             async for _ in r.aiter_text():
                 pass
 
-    assert tid not in messages._inflight
+    assert not messages._runner_registry.active(tid)
     assert messages._user_inflight == {}
     assert messages._server_inflight[0] == 0
 
@@ -300,32 +302,28 @@ async def test_limits_released_on_exception(migrated_data_dir, monkeypatch, rese
             # that counters cleaned up, not the wire symptom.
             pass
 
-    assert tid not in messages._inflight
+    assert not messages._runner_registry.active(tid)
     assert messages._user_inflight == {}
     assert messages._server_inflight[0] == 0
 
 
 @pytest.mark.asyncio
 async def test_release_admission_is_idempotent(reset_counters):
-    """``_release_admission`` called twice for the same (tid, uid) stays at 0.
+    """``_release_admission`` called twice for the same user stays at 0.
 
-    The natural-completion and mid-stream-exception paths both call it in
-    an ``event_gen.finally`` AND an outer ``except BaseException`` under
-    some sequences — the helper has to tolerate that. End-to-end
-    disconnect coverage lives in ``tests/gateway/test_cancel.py`` (real
-    server + abort), this unit-level check nails the counter math.
+    The on_terminate hook path and the early-exception path both call
+    it under some sequences — the helper has to tolerate that without
+    pushing counters negative.
     """
     from app.gateway.routers import messages
 
     async with messages._inflight_lock:
-        messages._inflight.add("t_x")
         messages._user_inflight["u"] = 1
         messages._server_inflight[0] = 1
 
-    await messages._release_admission("t_x", "u")
+    await messages._release_admission("u")
     # Double-release should NOT push counters negative.
-    await messages._release_admission("t_x", "u")
+    await messages._release_admission("u")
 
-    assert "t_x" not in messages._inflight
     assert messages._user_inflight == {}
     assert messages._server_inflight[0] == 0

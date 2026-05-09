@@ -75,14 +75,21 @@ def result_event(
     duration_ms: int,
     exit_code: int,
     cost_usd: float | None,
-    disposition: Literal["natural", "disconnected", "error"],
+    disposition: Literal["natural", "cancelled", "error", "disconnected"],
 ) -> dict:
     """Build a ``cc.result`` audit event dict.
 
-    Fires once per CC run, when the event generator unwinds — naturally,
-    via client disconnect, or via exception. ``cost_usd`` is ``None``
-    whenever CC didn't emit a terminal ``result`` frame (e.g. tests that
-    mock the stream, or runs killed before CC could summarize).
+    Fires once per CC run, when the runner's driver task finishes —
+    naturally (CC emitted ``result`` and exited), via explicit cancel
+    (``POST /cancel`` → SIGTERM), or via error (CC nonzero exit, adapter
+    timeout, driver crash). ``cost_usd`` is ``None`` whenever CC didn't
+    emit a terminal ``result`` frame.
+
+    The ``disposition="disconnected"`` value is retained for log-format
+    backward compatibility but is no longer emitted: SSE client
+    disconnects are decoupled from runner lifecycle and produce no audit
+    event of their own — the underlying run still finishes naturally,
+    cancelled, or in error, and that is what gets logged.
     """
     return {
         "event": "cc.result",

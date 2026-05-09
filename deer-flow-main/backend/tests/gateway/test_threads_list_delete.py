@@ -194,18 +194,20 @@ def test_delete_thread_busy_409(client):
     _login_as("u_alice")
     tid = c.post("/api/threads", json={}).json()["id"]
 
-    # Simulate in-flight by putting the tid directly into the _inflight
-    # set that the router guards. We can't actually run CC in unit tests,
-    # and admission control uses exactly this set.
+    # Simulate "an active runner exists" by stubbing
+    # ``runner_registry().active`` rather than reaching into the
+    # registry's internals. We can't actually spawn CC in unit tests,
+    # and the router's busy-check goes through this exact predicate.
     from app.gateway.routers import messages as messages_mod
 
-    messages_mod._inflight.add(tid)
+    real_active = messages_mod._runner_registry.active
+    messages_mod._runner_registry.active = lambda t: t == tid  # type: ignore[method-assign]
     try:
         r = c.delete(f"/api/threads/{tid}")
         assert r.status_code == 409, r.text
         assert r.json()["detail"] == "thread_busy"
     finally:
-        messages_mod._inflight.discard(tid)
+        messages_mod._runner_registry.active = real_active  # type: ignore[method-assign]
 
     # After the slot is released, delete works again.
     r = c.delete(f"/api/threads/{tid}")
